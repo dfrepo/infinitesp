@@ -256,6 +256,12 @@ static const uint16_t REG_ODU_CMD_STAGE = 0x0605;  // Commanded compressor stage
 static const uint16_t REG_ODU_STAGE_INFO = 0x060E;  // Actual stage index (byte 0: 0=off, 1..5=stage)
 static const uint16_t REG_ODU_SETPOINT = 0x060B;   // Target value at byte[2], native °F (label TBD; not confirmed a cooling setpoint)
 static const uint16_t REG_ODU_FLOATS = 0x061F;     // IEEE754 float32 array (superheat, subcooling, etc.)
+//
+// Table 0x3E (2-capacity / legacy heat pumps, e.g. "EVEREST TWO CAPACITY ODU").
+// Non-standard table; carries temps and stage on units that do NOT expose the
+// variable-speed 0302/060E registers. See ODU_PROTOCOL_FINDINGS.md.
+static const uint16_t REG_ODU_HEATPUMP01 = 0x3E01; // Ambient temp [0..1], coil temp [2..3] (int16 BE /16 °F); 0x03FF = absent sensor
+static const uint16_t REG_ODU_HEATPUMP02 = 0x3E02; // Stage byte [0]; raw value (stage index = value >> 1, bit 0 = unconfirmed flag)
 
 // Frame constants
 static const uint8_t FRAME_HEADER_SIZE = 8;
@@ -663,6 +669,25 @@ class InfinitESPComponent : public Component, public uart::UARTDevice {
   //   does not poll passively.
   static float odu_status1_meas_f_(const std::vector<uint8_t> &data, uint8_t idx) {
     return decode_int16_f_(data, 2 + idx * 4);
+  }
+  // ODU register 3E01 (REG_ODU_HEATPUMP01): 2-capacity/legacy heat pump temps.
+  //   idx 0 = ambient/outdoor at [0..1], idx 1 = coil at [2..3].
+  // int16 BE / 16 °F (same codec as 0302, but 2-byte packed stride from offset 0).
+  // Slots reading 0x03FF (1023 = 63.9°F sentinel) are absent sensors -> NAN.
+  static float odu_hp01_temp_f_(const std::vector<uint8_t> &data, uint8_t idx) {
+    size_t off = idx * 2;
+    if (off + 2 > data.size())
+      return NAN;
+    if (data[off] == 0x03 && data[off + 1] == 0xFF)  // absent-sensor sentinel
+      return NAN;
+    return decode_int16_f_(data, off);
+  }
+  // ODU register 3E02 (REG_ODU_HEATPUMP02): compressor stage byte.
+  // Returns the RAW byte on purpose (lossless): stage index = value >> 1, and
+  // bit 0 is an unconfirmed flag we must not discard at decode time. Observed:
+  // 0x01 idle (stage 0), 0x02 running low (stage 1); 0x04 high (stage 2) predicted.
+  static float odu_hp02_stage_raw_(const std::vector<uint8_t> &data) {
+    return data.size() >= 1 ? (float) data[0] : NAN;
   }
 
  protected:

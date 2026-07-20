@@ -114,6 +114,19 @@ void InfinitESPSensor::on_register_update(uint8_t device_addr, uint16_t register
     }
   }
 
+  // Fallback for 2-capacity/legacy ODUs that don't expose 060e: register 3E02.
+  // Publishes the RAW byte (lossless) into the same odu_stage entity. On these
+  // units the value reads 1/2/4 (idle/low/high); stage index = value >> 1, with
+  // bit 0 an unconfirmed flag preserved for later analysis.
+  if (register_key == REG_ODU_HEATPUMP02 && sensor_type_ == "odu_stage") {
+    auto *data = parent_->get_register(device_addr, REG_ODU_HEATPUMP02);
+    if (data) {
+      float s = parent_->odu_hp02_stage_raw_(*data);
+      if (!std::isnan(s))
+        value = s;
+    }
+  }
+
   // Commanded compressor stage from register 0605 (float32 BE at [0..3]: 0.0/1.0..5.0)
   // Write-only (thermostat→ODU); captured in handle_passive_frame_. Drives the
   // actual stage (060e) with ~15s lag.
@@ -194,6 +207,27 @@ void InfinitESPSensor::on_register_update(uint8_t device_addr, uint16_t register
         if (!std::isnan(f))
           value = fld.delta ? (f * (5.0f / 9.0f))            // ΔF → ΔC
                             : ((f - 32.0f) * (5.0f / 9.0f));  // °F → °C
+      }
+      break;  // at most one suffix matches
+    }
+  }
+
+  // Fallback for 2-capacity/legacy ODUs that don't expose 0302: register 3E01.
+  // Feeds the same odu_outdoor_temp/odu_coil_temp entities. Same codec
+  // (int16 BE / 16 °F) but 2-byte packed: ambient [0..1], coil [2..3].
+  if (register_key == REG_ODU_HEATPUMP01) {
+    struct Field { const char *suffix; uint8_t idx; };
+    static const Field fields[] = {
+        {"odu_outdoor_temp", 0}, {"odu_coil_temp", 1},
+    };
+    for (const auto &fld : fields) {
+      if (sensor_type_ != fld.suffix)
+        continue;
+      auto *data = parent_->get_register(device_addr, REG_ODU_HEATPUMP01);
+      if (data) {
+        float f = parent_->odu_hp01_temp_f_(*data, fld.idx);
+        if (!std::isnan(f))
+          value = (f - 32.0f) * (5.0f / 9.0f);  // °F → °C
       }
       break;  // at most one suffix matches
     }
