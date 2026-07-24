@@ -1,0 +1,53 @@
+# InfinitESP dashboard card - ready to paste
+#
+# Add on a dashboard: Edit dashboard -> + Add Card -> (bottom) Manual -> paste this.
+# Requires the custom card JS registered as a resource:
+#   URL: /local/infinitesp-card.js   Type: JavaScript Module
+#
+# Just set `device:` to your ESPHome node name (or pick the device in the visual
+# editor, which writes `device_id:`). The card derives every entity id as
+# sensor.<node_slug>_<sensor_slug> AND auto-discovers zones from the device's
+# climate entities. "infinitesp-dev" -> prefix "infinitesp_dev".
+# NOTE: ESPHome text sensors appear under the sensor.* domain in HA, so the fault
+# entities are sensor.infinitesp_dev_fault_N (not text_sensor.*).
+
+type: custom:infinitesp-card
+title: Carrier Infinity
+device: infinitesp-dev        # ESPHome node name -> derives all entity ids + zones
+temperature_unit: F          # F or C for the temperature tiles
+# Static pressure is computed in FIRMWARE (SP = static_k * blower_watts / cfm,
+# validated static_k=2.046) and exposed as sensor.<node>_static_pressure - the
+# card uses it automatically (accurate, recorded, graphable). If that sensor is
+# missing, the card falls back to its own on-the-fly estimate. No HA template
+# sensor is needed.
+# Each fault's description links to a lookup. Default = Google search by code.
+# {code} and {desc} are substituted. Point it at your model's manual if you like.
+# fault_link: "https://www.google.com/search?q=Carrier+Infinity+fault+code+{code}"
+# Optional: add/override fault-code descriptions shown in the card
+# fault_codes:
+#   47: "ODU <description>"
+#
+# Entity overrides (optional): only needed if you renamed an entity in HA or run
+# a different node name for some sensors. Anything you list here wins over the
+# auto-derived id; omit the whole block to use the derived ids.
+# entities:
+#   coil_temp: sensor.my_renamed_coil_temp
+#
+# Choose/reorder which features show in each section (omit to use defaults). Edit
+# via the visual editor (add / remove / drag-reorder) or set here directly.
+# sections:
+#   odu: [outdoor_temp, coil_temp, stage, line_voltage]
+#   idu: [airflow, blower_rpm, blower_watts, static_pressure]
+#   zoning: [temp, humidity, damper]
+#
+# Zones are AUTO-DISCOVERED from the device's climate entities. List them only
+# to control names/order or override a sensor — a bare name is enough, the
+# temp/humidity/damper sensors are deduced from the zone name:
+# zones:
+#   - name: Floor 3
+#   - name: Floor 1-2
+#     damper: sensor.my_custom_damper   # optional per-metric override
+# Faults are auto-derived as sensor.<node>_fault_1 .. _fault_10. Override only if
+# your fault sensors are named differently:
+# faults:
+#   - sensor.infinitesp_dev_fault_1

@@ -1,0 +1,39 @@
+name: Release card
+
+# Publishes ha/infinitesp-card.js as a release asset named infinitesp-card.js
+# so HACS can install/update the InfinitESP dashboard card. Trigger by pushing a
+# tag like v1.0.0 (or run manually and provide the tag).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        run: echo "tag=${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage release asset
+        run: cp ha/infinitesp-card.js infinitesp-card.js
+
+      - name: Create/update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          files: infinitesp-card.js
+          generate_release_notes: true
