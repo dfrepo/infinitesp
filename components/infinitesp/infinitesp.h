@@ -642,11 +642,14 @@ class InfinitESPComponent : public Component, public uart::UARTDevice {
   static float odu_commanded_stage_(const std::vector<uint8_t> &data) {
     return decode_f32_be_(data, 0);
   }
-  // ODU register 0304 (REG_ODU_STATUS3): line voltage at data[7], whole volts.
-  // Validated against Carrier cloud linevolt field: bus 0304[7]=238-240 vs cloud 239V.
-  // State-independent (held tight ±1 LSB across idle and across user's wider observations).
+  // ODU register 0304 (REG_ODU_STATUS3): line voltage, u16 BE at data[6..7]
+  // (the tag-0117 value in the 0304 TLV block), whole volts.
+  // NOTE: was read as the single byte data[7], which is correct only while the
+  // voltage is <= 255 (high byte 0). At >=256 V (e.g. 264 V) the low byte alone
+  // wraps (264 -> 8), so we must read the full 16-bit value. Validated against
+  // Carrier cloud linevolt (238-240 V) and the thermostat (264 V).
   static float odu_line_voltage_(const std::vector<uint8_t> &data) {
-    return data.size() >= 8 ? (float) data[7] : NAN;
+    return data.size() >= 8 ? (float) (((uint16_t) data[6] << 8) | data[7]) : NAN;
   }
   // ODU register 0304 (REG_ODU_STATUS3): operating mode at data[10]
   static float odu_operating_mode_(const std::vector<uint8_t> &data) {
