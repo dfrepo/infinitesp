@@ -1,6 +1,10 @@
 # ESPHome build artifacts
 .esphome/
 
+# Logs and backups
+*.log
+*.bcp
+
 # Secrets
 secrets.yaml
 
