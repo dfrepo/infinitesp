@@ -411,6 +411,13 @@ sensor:
     type: odu_mode
     icon: "mdi:briefcase-edit"
     entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "ODU Line Voltage"
+    type: odu_line_voltage
+    accuracy_decimals: 0
+    icon: "mdi:flash"
+    entity_category: diagnostic
 
   # Outdoor unit - superheat / subcooling (float registers)
   - platform: infinitesp
