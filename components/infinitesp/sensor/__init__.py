@@ -18,6 +18,7 @@ SENSOR_TYPES = {
     "vacation_max_temp": {"key": "vacation_max_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 0},
     # IDU sensors — device class 4
     "blower_rpm": {"key": "blower_rpm", "unit": "RPM", "bus_class": 4},
+    "blower_rpm_0404": {"key": "blower_rpm_0404", "unit": "RPM", "bus_class": 4, "disabled_by_default": True},
     "airflow_cfm": {"key": "airflow_cfm", "unit": "ft³/min", "bus_class": 4},
     # Blower motor power (register 0413, float32 BE watts) — the ECM load signal
     "blower_watts": {"key": "blower_watts", "unit": "W", "bus_class": 4},

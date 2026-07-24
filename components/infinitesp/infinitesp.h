@@ -232,6 +232,10 @@ static const uint16_t REG_IDU_STATUS = 0x0306;     // Blower RPM, operating info
 static const uint16_t REG_IDU_CONFIG = 0x0316;      // Airflow CFM, electric heat (14 bytes)
 static const uint16_t REG_IDU_CYCLES = 0x0310;     // Cycle counters (4-byte key-value entries)
 static const uint16_t REG_IDU_RUNTIME = 0x0311;    // Runtime hours (4-byte key-value entries)
+// Table 0x04 VARSPEED (variable-speed ECM blower drive). 0404 mirrors 0306's
+// airflow [6..7] and blower RPM [8..9] but is polled less often (~7s vs ~3s);
+// exposed for cross-checking the primary 0306 blower RPM.
+static const uint16_t REG_IDU_VARSPEED = 0x0404;   // Airflow CFM [6..7], blower RPM [8..9]
 // Blower motor electrical power (watts) as IEEE-754 float32 BE at [8..11].
 // Ramps with airflow, 0 when the blower is off (stage-1 ~194W, stage-2 ~378W
 // observed at 863/1175 CFM). This is the ECM torque/load signal the furnace
@@ -586,6 +590,13 @@ class InfinitESPComponent : public Component, public uart::UARTDevice {
   static float idu_blower_rpm_(const std::vector<uint8_t> &data) {
     if (data.size() < 3) return NAN;
     return (float) (((uint16_t) data[1] << 8) | data[2]);
+  }
+  // IDU register 0404 (REG_IDU_VARSPEED): blower RPM, u16 BE at [8..9].
+  // Same ECM value as 0306 but from the VARSPEED table; polled ~7s (slower than
+  // 0306's ~3s). Exposed only to cross-check the primary blower RPM.
+  static float idu_varspeed_blower_rpm_(const std::vector<uint8_t> &data) {
+    if (data.size() < 10) return NAN;
+    return (float) (((uint16_t) data[8] << 8) | data[9]);
   }
   // IDU register 0316 (REG_IDU_CONFIG): airflow CFM u16 BE at [4..5]
   static float idu_airflow_cfm_(const std::vector<uint8_t> &data) {

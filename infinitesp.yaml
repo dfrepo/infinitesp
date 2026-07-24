@@ -313,6 +313,16 @@ sensor:
     type: blower_rpm
     icon: "mdi:fan"
     entity_category: diagnostic
+  # Alternative source for the same variable-speed blower RPM, read from the
+  # VARSPEED table (register 0404) instead of the primary status register (0306).
+  # Undocumented in the Infinitude wiki; useful only as a cross-check. To use it,
+  # comment out the "Blower RPM" entity above (or rename this one) and uncomment:
+  # - platform: infinitesp
+  #   infinitesp_id: infinitesp_hub
+  #   name: "Blower RPM (0404)"
+  #   type: blower_rpm_0404
+  #   icon: "mdi:fan"
+  #   entity_category: diagnostic
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
     name: "Airflow CFM"

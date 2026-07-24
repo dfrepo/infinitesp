@@ -51,6 +51,16 @@ void InfinitESPSensor::on_register_update(uint8_t device_addr, uint16_t register
     }
   }
 
+  // Blower RPM from register 0404 (VARSPEED table) — comparison/diagnostic vs 0306
+  if (register_key == REG_IDU_VARSPEED && sensor_type_ == "blower_rpm_0404") {
+    auto *data = parent_->get_register(device_addr, REG_IDU_VARSPEED);
+    if (data) {
+      float rpm = parent_->idu_varspeed_blower_rpm_(*data);
+      if (!std::isnan(rpm))
+        value = rpm;
+    }
+  }
+
   // Airflow CFM from register 0316
   if (register_key == REG_IDU_CONFIG && sensor_type_ == "airflow_cfm") {
     auto *data = parent_->get_register(device_addr, REG_IDU_CONFIG);
