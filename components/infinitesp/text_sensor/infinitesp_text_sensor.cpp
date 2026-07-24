@@ -276,6 +276,32 @@ void InfinitESPTextSensor::on_register_update(uint8_t device_addr, uint16_t regi
     return;
   }
 
+  // Device model from 0104 DeviceInfo (Model field at offset 64, 20 bytes).
+  // Requires device_address to be set — each physical device needs its own sensor
+  // (0x50 ODU, 0x40 furnace/air-handler, 0x60 zone controller).
+  if (sensor_type_ == "device_model") {
+    if (register_key != REG_DEVICE_INFO)
+      return;
+    if (target_device_addr_ != 0 && device_addr != target_device_addr_)
+      return;
+    auto *data = parent_->get_register(device_addr, REG_DEVICE_INFO);
+    if (!data || data->size() < REG_DEVINFO_MODEL_OFFSET + REG_DEVINFO_MODEL_LEN)
+      return;
+    std::string model;
+    for (uint8_t i = 0; i < REG_DEVINFO_MODEL_LEN; i++) {
+      char c = (char) (*data)[REG_DEVINFO_MODEL_OFFSET + i];
+      if (c == '\0')
+        break;
+      model += c;
+    }
+    // trim trailing spaces
+    while (!model.empty() && model.back() == ' ')
+      model.pop_back();
+    if (!model.empty())
+      publish_state(model);
+    return;
+  }
+
   // Manufacture date derived from 0104 serial number
   // Carrier serial format: first 2 digits = week (01-52), next 2 digits = year (00-99)
   // Requires device_address to be set — each physical device needs its own sensor

@@ -23,6 +23,7 @@ TEXT_SENSOR_TYPES = {
     "comfort_profile": "comfort_profile",
     "fault_history": "fault_history",
     "manufacture_date": "manufacture_date",
+    "device_model": "device_model",
 }
 
 CONFIG_SCHEMA = text_sensor.text_sensor_schema(InfinitESPTextSensor).extend(

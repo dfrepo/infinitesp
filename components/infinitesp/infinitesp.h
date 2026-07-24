@@ -242,6 +242,11 @@ static const uint16_t REG_IDU_VARSPEED = 0x0404;   // Airflow CFM [6..7], blower
 // uses internally to compute the static pressure it displays.
 static const uint16_t REG_IDU_POWER = 0x0413;
 
+// DeviceInfo (0104) field offsets: Module[0..48), Firmware[48..64),
+// Model[64..84), Serial[84..120). Confirmed against ODU/furnace/ZC captures.
+static const uint8_t REG_DEVINFO_MODEL_OFFSET = 64;
+static const uint8_t REG_DEVINFO_MODEL_LEN = 20;
+
 // ODU (Outdoor Unit) register keys
 // Passively snooped from thermostat<->ODU traffic.
 // ODU tables (from device self-described 0xXX01 tabledefs):

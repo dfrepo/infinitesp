@@ -593,6 +593,30 @@ text_sensor:
     type: hold_state
     zone: 1
 
+  # Device models (from 0104 DeviceInfo). device_address selects the device:
+  #   0x50 = outdoor unit, 0x40 = furnace/air-handler, 0x60 = zone controller.
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Outdoor Unit Model"
+    type: device_model
+    device_address: 0x50
+    icon: "mdi:heat-pump-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Furnace Model"
+    type: device_model
+    device_address: 0x40
+    icon: "mdi:fan"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Zoning Board Model"
+    type: device_model
+    device_address: 0x60
+    icon: "mdi:view-dashboard-outline"
+    entity_category: diagnostic
+
   # Fault history (polled every ~31s)
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
