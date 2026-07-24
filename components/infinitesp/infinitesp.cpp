@@ -1111,10 +1111,35 @@ const std::vector<uint8_t> *InfinitESPComponent::get_register(uint8_t addr, uint
   return nullptr;
 }
 
+std::string InfinitESPComponent::fault_date_str(uint16_t trailing_daycount, uint16_t entry_daycount) const {
+  // Faults store a per-device day-count (days since install/commission). The
+  // 4202 reply's trailing 2 bytes are the CURRENT day-count, so a fault is
+  // (trailing - entry) days ago. Anchor that age to the wall clock if we have
+  // one; otherwise report the relative age. Validated against thermostat UI.
+  int32_t age_days = (int32_t) trailing_daycount - (int32_t) entry_daycount;
+  if (age_days < 0)
+    age_days = 0;
+  char buf[16];
+  if (rtc_ != nullptr) {
+    ESPTime now = rtc_->now();
+    if (now.is_valid()) {
+      ESPTime d = ESPTime::from_epoch_local((time_t) now.timestamp - (time_t) age_days * 86400);
+      snprintf(buf, sizeof(buf), "%04d-%02d-%02d", d.year, d.month, d.day_of_month);
+      return std::string(buf);
+    }
+  }
+  snprintf(buf, sizeof(buf), "%dd-ago", (int) age_days);
+  return std::string(buf);
+}
+
 bool InfinitESPComponent::has_active_fault() const {
   // Thermostat fault history 0x4202: 10 entries × 7 bytes
-  // (code, source, hour, minute, days_be16, status). status bit 7 = 0 means
-  // the fault is currently ACTIVE. Skip empty slots (code=source=days=0).
+  // (code, source, hour, minute, days_be16, status). status bit 7 classifies
+  // the entry: 0 = hard FAULT, 1 = notice/comm-error. This is a severity/class
+  // flag, NOT a real-time "currently active" state (validated against the
+  // thermostat's "fault" indicator). We report ON if the history contains any
+  // hard-fault entry. NOTE: this latches on historical faults; a true real-time
+  // "active" signal would need a live status register.
   const auto *data = get_register(ADDR_THERMOSTAT, REG_TSTAT_FAULTS);
   if (!data || data->size() < 70)
     return false;

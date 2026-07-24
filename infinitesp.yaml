@@ -625,6 +625,69 @@ text_sensor:
     icon: "mdi:alert-circle-outline"
     entity_category: diagnostic
 
+  # Per-entry fault sensors (1 = most recent). Enabled by default so the
+  # InfinitESP card's Fault History populates without enabling each one manually.
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 1"
+    type: fault_1
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 2"
+    type: fault_2
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 3"
+    type: fault_3
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 4"
+    type: fault_4
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 5"
+    type: fault_5
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 6"
+    type: fault_6
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 7"
+    type: fault_7
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 8"
+    type: fault_8
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 9"
+    type: fault_9
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Fault 10"
+    type: fault_10
+    icon: "mdi:alert-circle-outline"
+    entity_category: diagnostic
+
   # Comfort profiles (home/away/sleep/wake setpoints + fan)
   - platform: infinitesp
     infinitesp_id: infinitesp_hub

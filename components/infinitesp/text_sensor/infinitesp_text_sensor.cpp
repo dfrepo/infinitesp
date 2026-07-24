@@ -1,20 +1,33 @@
 #include "infinitesp_text_sensor.h"
 #include <cctype>
+#include <cstdlib>
 
 namespace esphome {
 namespace infinitesp {
 
 // Fault source byte is the device bus address; the high nibble is the device
-// class (0x2x thermostat/UI, 0x4x IDU/furnace, 0x5x ODU). Matches Infinitude
-// (0x20=UI, 0x40=furnace, 0x52=AC) and the device-class convention, robust to
-// other instances (0x21 stat, 0x53 ODU). Confirmed against live 4202 data
-// where every entry is src=0x20 (thermostat).
+// class (0x2x thermostat/UI, 0x4x IDU/furnace, 0x5x ODU, 0x6x zone controller).
+// Matches Infinitude and the device-class convention. Confirmed against live
+// 4202 data (src=0x20 thermostat, src=0x60 zone controller).
 static const char *fault_source_name(uint8_t source) {
   switch (source >> 4) {
     case 0x2: return "UI";   // thermostat
     case 0x4: return "IDU";  // indoor unit / furnace
     case 0x5: return "ODU";  // outdoor unit
+    case 0x6: return "ZC";   // zone controller
     default:  return "?";
+  }
+}
+
+// Known fault-code descriptions, cross-checked against the thermostat's fault
+// history screen. Extend as more codes are confirmed. Returns nullptr if unknown
+// (callers then show just the numeric code).
+static const char *fault_code_name(uint8_t code) {
+  switch (code) {
+    case 16:  return "Comm Error";        // ZC/zone communication error (notice)
+    case 171: return "Sensor Zn2 Comm";   // Smart Sensor Zone 2 COMM Fault
+    case 186: return "SAM Comm Fault";     // SAM Communication Fault
+    default:  return nullptr;
   }
 }
 
@@ -199,22 +212,32 @@ void InfinitESPTextSensor::on_register_update(uint8_t device_addr, uint16_t regi
     return;
   }
 
-  // Fault history from 4202
-  // 10 entries × 7 bytes: code(1), source(1), hour(1), minute(1), days_be16(2), status(1)
-  // Days since 2013-01-01 epoch. Status bit 7 = active (0=active, 1=cleared), bits 0-6 = occurrence count.
-  if (sensor_type_ == "fault_history") {
+  // --- Fault history from 4202 ---
+  // Layout: 10 entries x 7 bytes [code, source, hour, minute, days_be16, status]
+  //   + 2 trailing bytes = CURRENT day-count (days since install).
+  // days_be16 is a per-device day-count; a fault is (trailing - days) days ago.
+  //   -> absolute date via parent_->fault_date_str() (needs time: source).
+  // status: bit7 = severity class (0 = hard FAULT, 1 = notice/comm-error;
+  //   matches the thermostat's "fault" indicator), bits0-6 = occurrence count.
+  //
+  // "fault_history"     = compact one-line-per-entry summary (kept < 255 chars
+  //                       so Home Assistant accepts the state).
+  // "fault_1".."fault_10" = one verbose entry each (1 = most recent), for a
+  //                       Markdown card that needs no length limit.
+  bool is_summary = (sensor_type_ == "fault_history");
+  bool is_entry = (sensor_type_.compare(0, 6, "fault_") == 0 && !is_summary);
+  if (is_summary || is_entry) {
     if (register_key != REG_TSTAT_FAULTS)
       return;
     auto *data = parent_->get_register(ADDR_THERMOSTAT, REG_TSTAT_FAULTS);
     if (!data || data->size() < 70)
       return;
 
-    // Source label: fault_source_name() (device-class high nibble of the bus
-    // address). Fault codes are shown as decimal numbers. Human-readable
-    // descriptions require a verified Carrier Infinity / Bryant Evolution
-    // fault-code reference, which is not available here; add one when found.
-    std::string result;
-    for (int i = 0; i < 10; i++) {
+    uint16_t trailing = data->size() >= 72
+                            ? (((uint16_t) (*data)[70] << 8) | (*data)[71])
+                            : 0;  // 0 -> fault_date_str reports age from 0
+
+    auto decode_entry = [&](int i, bool verbose) -> std::string {
       uint8_t base = i * 7;
       uint8_t code = (*data)[base + 0];
       uint8_t source = (*data)[base + 1];
@@ -222,59 +245,59 @@ void InfinitESPTextSensor::on_register_update(uint8_t device_addr, uint16_t regi
       uint8_t minute = (*data)[base + 3];
       uint16_t days = ((uint16_t) (*data)[base + 4] << 8) | (*data)[base + 5];
       uint8_t status = (*data)[base + 6];
-      bool active = !(status & 0x80);  // bit 7: 0=active, 1=cleared
-      uint8_t occurrences = status & 0x7F;
-
-      // Skip empty entries (all zeros)
       if (code == 0 && source == 0 && days == 0)
-        continue;
-
-      if (!result.empty())
-        result += "\n";
-
-      // Convert days since 2013-01-01 to a date string
-      // 2013-01-01 epoch, account for leap years
-      uint32_t total_days = days;
-      int year = 2013;
-      while (total_days >= 365) {
-        uint16_t year_days = ((year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) ? 366 : 365);
-        if (total_days >= year_days) {
-          total_days -= year_days;
-          year++;
-        } else {
-          break;
-        }
+        return "";  // empty slot
+      bool is_fault = !(status & 0x80);  // bit7=0 -> hard fault
+      uint8_t occ = status & 0x7F;
+      std::string date = parent_->fault_date_str(trailing, days);
+      const char *sev = is_fault ? "FAULT" : "notice";
+      const char *src = fault_source_name(source);
+      const char *name = fault_code_name(code);
+      char buf[96];
+      if (verbose) {
+        // e.g. "FAULT SAM Comm Fault (186) UI 2026-07-17 09:54 x3"
+        if (name)
+          snprintf(buf, sizeof(buf), "%s %s (%d) %s %s %02d:%02d x%d",
+                   sev, name, code, src, date.c_str(), hour, minute, occ);
+        else
+          snprintf(buf, sizeof(buf), "%s code %d %s %s %02d:%02d x%d",
+                   sev, code, src, date.c_str(), hour, minute, occ);
+      } else {
+        // compact: "F186 UI 2026-07-17 x3"  (F=fault, n=notice)
+        snprintf(buf, sizeof(buf), "%c%d %s %s x%d",
+                 is_fault ? 'F' : 'n', code, src, date.c_str(), occ);
       }
-      static const uint8_t mdays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-      uint8_t month = 0;
-      while (month < 12) {
-        uint8_t dim = mdays[month];
-        if (month == 1 && (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)))
-          dim = 29;
-        if (total_days >= dim) {
-          total_days -= dim;
-          month++;
-        } else {
-          break;
-        }
-      }
-      uint8_t day = (uint8_t) total_days + 1;
-      month++;  // 1-indexed
+      return std::string(buf);
+    };
 
-      const char *src_name = fault_source_name(source);
-      char buf[80];
-      snprintf(buf, sizeof(buf), "%s code=%02d src=%s %02d:%02d %04d-%02d-%02d occ=%d%s",
-               active ? "ACT" : "CLR", code, src_name, hour, minute, year, month, day,
-               occurrences, (i == 0 && active) ? " (latest)" : "");
-      result += buf;
+    if (is_entry) {
+      int idx = atoi(sensor_type_.c_str() + 6);  // "fault_3" -> 3
+      if (idx < 1 || idx > 10)
+        return;
+      std::string s = decode_entry(idx - 1, /*verbose=*/true);
+      publish_state(s.empty() ? "—" : s);
+      return;
     }
 
+    // Summary: join entries, guard the HA 255-char state limit.
+    std::string result;
+    for (int i = 0; i < 10; i++) {
+      std::string line = decode_entry(i, /*verbose=*/false);
+      if (line.empty())
+        continue;
+      std::string next = result.empty() ? line : result + "\n" + line;
+      if (next.size() > 250) {  // leave headroom under HA's 255 cap
+        result += "\n…";
+        break;
+      }
+      result = next;
+    }
     if (result.empty())
       result = "No faults";
-
     publish_state(result);
     return;
   }
+
 
   // Device model from 0104 DeviceInfo (Model field at offset 64, 20 bytes).
   // Requires device_address to be set — each physical device needs its own sensor

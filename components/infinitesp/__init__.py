@@ -3,13 +3,14 @@ import esphome.config_validation as cv
 import logging
 from esphome import pins
 from esphome.components import uart
+from esphome.components import time as time_
 from esphome.const import CONF_ID
 
 _LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@nebulous"]
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["climate", "sensor", "select", "text_sensor", "binary_sensor", "cover"]
+AUTO_LOAD = ["climate", "sensor", "select", "text_sensor", "binary_sensor", "cover", "time"]
 MULTI_CONF = True
 
 CONF_INFINITESP_ID = "infinitesp_id"
@@ -23,6 +24,7 @@ InfinitESPEntity = infinitesp_ns.class_("InfinitESPEntity")
 CONF_SAM_ADDRESS = "sam_address"
 CONF_ADDRESS = "address"  # deprecated alias for sam_address
 CONF_FLOW_CONTROL_PIN = "flow_control_pin"
+CONF_TIME_ID = "time_id"
 CONF_ZONE_CONTROLLER_ADDRESS = "zone_controller_address"
 CONF_TEMPERATURE_UNIT = "temperature_unit"
 
@@ -111,6 +113,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_STATUS_LED_PIN): pins.gpio_output_pin_schema,
             # RS485 transmit enable pin (DE/RE control)
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
+            # Optional time source (e.g. homeassistant_time) for fault-history dates
+            cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
             # Zone controller emulation: set to 0x60 to emulate a SYSTXCC4ZC01
             cv.Optional(CONF_ZONE_CONTROLLER_ADDRESS, default=0): cv.int_range(min=0, max=255),
             # Temperature unit: auto (heuristic), F, or C
@@ -207,6 +211,10 @@ async def to_code(config):
         pin = await cg.gpio_pin_expression(config[CONF_FLOW_CONTROL_PIN])
         cg.add(var.set_flow_control_pin(pin))
         cg.add_define("USE_INFINITESP_FLOW_CONTROL_PIN")
+
+    if CONF_TIME_ID in config:
+        rtc = await cg.get_variable(config[CONF_TIME_ID])
+        cg.add(var.set_time(rtc))
 
     if CONF_STATUS_LIGHT_ID in config:
         light_var = await cg.get_variable(config[CONF_STATUS_LIGHT_ID])

@@ -24,6 +24,9 @@ TEXT_SENSOR_TYPES = {
     "fault_history": "fault_history",
     "manufacture_date": "manufacture_date",
     "device_model": "device_model",
+    # Per-entry fault sensors (1 = most recent) for a Markdown card that needs
+    # no 255-char limit. Enable in YAML as needed.
+    **{f"fault_{i}": f"fault_{i}" for i in range(1, 11)},
 }
 
 CONFIG_SCHEMA = text_sensor.text_sensor_schema(InfinitESPTextSensor).extend(

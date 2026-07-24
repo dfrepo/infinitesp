@@ -4,6 +4,7 @@
 #include "esphome/core/preferences.h"
 #include "esphome/core/gpio.h"
 #include "esphome/components/uart/uart.h"
+#include "esphome/components/time/real_time_clock.h"
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
 #endif
@@ -418,6 +419,15 @@ class InfinitESPComponent : public Component, public uart::UARTDevice {
   void set_temperature_unit(TemperatureUnit unit) { temperature_unit_ = unit; }
   TemperatureUnit get_temperature_unit() const { return temperature_unit_; }
   void register_entity(InfinitESPEntity *entity) { entities_.push_back(entity); }
+
+  // Optional time source (e.g. homeassistant_time) used to render fault-history
+  // dates. Faults store a per-device "days since install" counter; the 4202
+  // reply's trailing 2 bytes give the current day-count, so a fault's date is
+  // now() - (trailing - entry_days). See fault_date_str().
+  void set_time(esphome::time::RealTimeClock *rtc) { rtc_ = rtc; }
+  // Render a fault entry's date from the self-calibrating day-count anchor.
+  // Returns "YYYY-MM-DD" when a valid clock is available, else "<age>d-ago".
+  std::string fault_date_str(uint16_t trailing_daycount, uint16_t entry_daycount) const;
 
   // Status LED configuration
 #ifdef USE_INFINITESP_STATUS_LED_PIN
@@ -963,6 +973,7 @@ class InfinitESPComponent : public Component, public uart::UARTDevice {
   bool status_light_has_rgb_{false};   // cached from traits check
   uint32_t status_light_last_update_{0};
 #endif
+  esphome::time::RealTimeClock *rtc_{nullptr};  // optional; for fault-history dates
 
   // Unified status LED state tracking (used by both modes)
   // Sequential narrative: yellow blink (bus not ready) → blue blink (wifi not ready) → green (all good)
