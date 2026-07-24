@@ -347,6 +347,26 @@ sensor:
     icon: "mdi:gauge"
     entity_category: diagnostic
 
+  # ──────────────────────────────────────────────
+  # Damper position sensors (numeric, per zone) — OPTIONAL
+  # ──────────────────────────────────────────────
+  # Exposes each zone's damper opening as a graphable 0–100% number, decoded
+  # from the thermostat's damper COMMAND register (0308). This is the same
+  # commanded position shown by the "…Damper" cover entities above, but as a
+  # plain sensor so it can be plotted in Home Assistant history/ApexCharts
+  # (cover entities don't graph). 0308 is populated on both the primary (0x60)
+  # and secondary (0x61, zones 5–8) controllers, so this works on every zone.
+  # Add one entry per active zone (1–8); set `zone:` to the zone number.
+  # ──────────────────────────────────────────────
+  # Generic template — one per additional zone:
+  # - platform: infinitesp
+  #   infinitesp_id: infinitesp_hub
+  #   name: "Zone 3 Damper Position"
+  #   type: damper_position
+  #   zone: 3
+  #   icon: "mdi:valve"
+  #   entity_category: diagnostic
+
   # Outdoor unit - compressor, passively snooped (target=commanded, actual=measured)
   - platform: infinitesp
     infinitesp_id: infinitesp_hub

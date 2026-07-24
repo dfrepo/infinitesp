@@ -94,6 +94,20 @@ void InfinitESPSensor::on_register_update(uint8_t device_addr, uint16_t register
     }
   }
 
+  // Commanded damper position (percent) per zone from ZC register 0308.
+  // History-graphable numeric complement to the damper cover (which exposes the
+  // same commanded position but as a non-graphable cover). Reads 0308, not the
+  // 0319 state feedback: 0308 is populated on both the primary (0x60) and
+  // secondary (0x61) controllers, whereas 0319 returns all-FF on the secondary.
+  if (register_key == REG_ZC_DAMPER_CMD && sensor_type_ == "damper_position") {
+    auto *data = parent_->get_register(device_addr, REG_ZC_DAMPER_CMD);
+    if (data) {
+      float p = parent_->zc_damper_percent_(*data, zone_);
+      if (!std::isnan(p))
+        value = p;
+    }
+  }
+
   // ODU (Outdoor Unit) passively snooped registers
   // Compressor RPM from register 0604. Two uint16 BE pairs per stage:
   //   target (commanded) at [0..1], actual (measured) at [2..3].

@@ -635,6 +635,22 @@ class InfinitESPComponent : public Component, public uart::UARTDevice {
       return NAN;
     return w;
   }
+  // ZC damper registers (0308 command / 0319 state): per-zone damper position
+  // at byte[zone-1], 0x00 (closed) .. 0x0F (full open); 0xFF = zone not present.
+  // Returns 0-100 percent (NAN if absent). Used by the damper_position sensor,
+  // which reads the COMMANDED register 0308 (populated on both the primary and
+  // secondary controllers) to give a history-graphable numeric complement to
+  // the damper cover. Both registers share this 8-byte, one-byte-per-zone layout.
+  static float zc_damper_percent_(const std::vector<uint8_t> &data, uint8_t zone) {
+    if (zone < 1 || zone > 8 || data.size() < zone)
+      return NAN;
+    uint8_t raw = data[zone - 1];
+    if (raw == 0xFF)
+      return NAN;
+    if (raw > 15)
+      raw = 15;
+    return (float) raw * (100.0f / 15.0f);
+  }
   // ODU register 0604 (REG_ODU_COMP_SPEED): two uint16 BE pairs per stage.
   //   [0..1] = target (commanded) RPM  — holds round rated stage speeds
   //            {0,1500,1700,2460,2800,3650}

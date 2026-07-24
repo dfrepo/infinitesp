@@ -61,6 +61,10 @@ SENSOR_TYPES = {
     "zc_zone_temperature": {"key": "zc_zone_temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6},
     "zc_lat": {"key": "zc_lat", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
     "zc_hpt": {"key": "zc_hpt", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
+    # ZC commanded damper position per zone (register 0308, 0-15 -> 0-100%).
+    # Graphable numeric complement to the damper cover; reads 0308 (populated on
+    # both primary and secondary controllers) rather than the 0319 feedback.
+    "damper_position": {"key": "damper_position", "unit": "%", "bus_class": 6},
     # IDU cycle counters (register 0310, 4-byte key-value entries) — device class 4
     "idu_low_heat_cycles": {"key": "idu_low_heat_cycles", "unit": "cycles", "bus_class": 4},
     "idu_high_heat_cycles": {"key": "idu_high_heat_cycles", "unit": "cycles", "bus_class": 4},
