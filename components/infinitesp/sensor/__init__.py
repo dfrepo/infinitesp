@@ -1,10 +1,11 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
-from esphome.const import CONF_ID, CONF_TYPE, CONF_DISABLED_BY_DEFAULT, STATE_CLASS_MEASUREMENT, DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLTAGE
+from esphome.const import CONF_ID, CONF_TYPE, CONF_DISABLED_BY_DEFAULT, CONF_ACCURACY_DECIMALS, STATE_CLASS_MEASUREMENT, DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLTAGE
 from .. import InfinitESPEntity, CONF_INFINITESP_ID, infinitesp_ns, register_infinitesp_entity
 
 CONF_ZONE = "zone"
+CONF_STATIC_K = "static_k"
 
 InfinitESPSensor = infinitesp_ns.class_("InfinitESPSensor", sensor.Sensor, InfinitESPEntity)
 
@@ -18,6 +19,11 @@ SENSOR_TYPES = {
     # IDU sensors — device class 4
     "blower_rpm": {"key": "blower_rpm", "unit": "RPM", "bus_class": 4},
     "airflow_cfm": {"key": "airflow_cfm", "unit": "ft³/min", "bus_class": 4},
+    # Blower motor power (register 0413, float32 BE watts) — the ECM load signal
+    "blower_watts": {"key": "blower_watts", "unit": "W", "bus_class": 4},
+    # Static pressure (in. w.c.), derived in firmware from blower watts + airflow:
+    # SP = static_k * watts / cfm. Coefficient configurable via `static_k`.
+    "static_pressure": {"key": "static_pressure", "unit": "inH2O", "bus_class": 4, "accuracy": 2},
     # ODU sensors — device class 5
     # bare = actual (measured) RPM [2..3] (the original `compressor_rpm` read
     # [0..1] = target; re-pointed to actual). target_compressor_rpm [0..1] is
@@ -84,6 +90,8 @@ def _apply_sensor_type(config):
     info = SENSOR_TYPES[config[CONF_TYPE]]
     config[sensor.CONF_UNIT_OF_MEASUREMENT] = info["unit"]
     config[sensor.CONF_DEVICE_CLASS] = info.get("device_class", "")
+    if "accuracy" in info:
+        config[CONF_ACCURACY_DECIMALS] = info["accuracy"]
     if info.get("disabled_by_default"):
         config[CONF_DISABLED_BY_DEFAULT] = True
     return config
@@ -99,6 +107,7 @@ CONFIG_SCHEMA = cv.All(
             {
                 cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),
                 cv.Optional(CONF_ZONE, default=1): cv.int_range(min=1, max=8),
+                cv.Optional(CONF_STATIC_K, default=2.046): cv.float_,
             }
         )
     ),
@@ -114,4 +123,5 @@ async def to_code(config):
     cg.add(var.set_zone(config[CONF_ZONE]))
     cg.add(var.set_sensor_type(info["key"]))
     cg.add(var.set_bus_class(info.get("bus_class", 0)))
+    cg.add(var.set_static_k(config[CONF_STATIC_K]))
     await register_infinitesp_entity(var, config)

@@ -232,6 +232,11 @@ static const uint16_t REG_IDU_STATUS = 0x0306;     // Blower RPM, operating info
 static const uint16_t REG_IDU_CONFIG = 0x0316;      // Airflow CFM, electric heat (14 bytes)
 static const uint16_t REG_IDU_CYCLES = 0x0310;     // Cycle counters (4-byte key-value entries)
 static const uint16_t REG_IDU_RUNTIME = 0x0311;    // Runtime hours (4-byte key-value entries)
+// Blower motor electrical power (watts) as IEEE-754 float32 BE at [8..11].
+// Ramps with airflow, 0 when the blower is off (stage-1 ~194W, stage-2 ~378W
+// observed at 863/1175 CFM). This is the ECM torque/load signal the furnace
+// uses internally to compute the static pressure it displays.
+static const uint16_t REG_IDU_POWER = 0x0413;
 
 // ODU (Outdoor Unit) register keys
 // Passively snooped from thermostat<->ODU traffic.
@@ -590,6 +595,34 @@ class InfinitESPComponent : public Component, public uart::UARTDevice {
   // IDU register 0316: electric heat present, data[0] & 0x03
   static bool idu_electric_heat_(const std::vector<uint8_t> &data) {
     return !data.empty() && (data[0] & 0x03) != 0;
+  }
+  // Derived static pressure (in. w.c.) from blower watts (0413) and airflow
+  // (0316): SP = k * Watts / CFM  (air power = efficiency * motor power). The
+  // furnace computes its displayed static internally from ECM torque/current;
+  // watts encodes that load, so this tracks it closely. Validated to +/-0.01 vs
+  // the thermostat across three points (0.54@228W/863, 0.66@378.5W/1175,
+  // 0.66@380W/1175) -> k=2.046, blower efficiency ~24%.
+  static float idu_static_pressure_(const std::vector<uint8_t> &power_data,
+                                    const std::vector<uint8_t> &cfm_data, float k) {
+    float w = idu_blower_watts_(power_data);
+    float cfm = idu_airflow_cfm_(cfm_data);
+    // NAN only when a register isn't decodable yet (skip publish, keep prior).
+    if (std::isnan(w) || std::isnan(cfm))
+      return NAN;
+    // Blower off (no watts) or no airflow -> no static. Publish 0 so the sensor
+    // drops to zero instead of freezing at its last running value.
+    if (w <= 0.0f || cfm <= 0.0f)
+      return 0.0f;  // blower off -> effectively no static
+    return k * w / cfm;
+  }
+  // IDU register 0413 (REG_IDU_POWER): blower motor power in watts, IEEE-754
+  // float32 (big-endian) at [8..11]. 0 while the blower is off; ramps with
+  // airflow. Guarded to a plausible 0-5000 W range.
+  static float idu_blower_watts_(const std::vector<uint8_t> &data) {
+    float w = decode_f32_be_(data, 8);
+    if (std::isnan(w) || !std::isfinite(w) || w < 0.0f || w > 5000.0f)
+      return NAN;
+    return w;
   }
   // ODU register 0604 (REG_ODU_COMP_SPEED): two uint16 BE pairs per stage.
   //   [0..1] = target (commanded) RPM  — holds round rated stage speeds

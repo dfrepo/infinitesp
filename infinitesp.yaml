@@ -320,6 +320,23 @@ sensor:
     icon: "mdi:air-filter"
     entity_category: diagnostic
 
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Blower Power"
+    type: blower_watts
+    icon: "mdi:lightning-bolt"
+    entity_category: diagnostic
+
+  # Static pressure (in. w.c.), computed in firmware from blower watts + airflow:
+  #   SP = static_k * watts / cfm   (validated k=2.046 vs thermostat; override if needed)
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    name: "Static Pressure"
+    type: static_pressure
+    # static_k: 2.046
+    icon: "mdi:gauge"
+    entity_category: diagnostic
+
   # Outdoor unit - compressor, passively snooped (target=commanded, actual=measured)
   - platform: infinitesp
     infinitesp_id: infinitesp_hub

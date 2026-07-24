@@ -61,6 +61,29 @@ void InfinitESPSensor::on_register_update(uint8_t device_addr, uint16_t register
     }
   }
 
+  // Blower motor power (watts) from register 0413 (float32 BE at [8..11])
+  if (register_key == REG_IDU_POWER && sensor_type_ == "blower_watts") {
+    auto *data = parent_->get_register(device_addr, REG_IDU_POWER);
+    if (data) {
+      float w = parent_->idu_blower_watts_(*data);
+      if (!std::isnan(w))
+        value = w;
+    }
+  }
+
+  // Derived static pressure (in. w.c.) from blower watts (0413) + airflow (0316).
+  // Recomputes whenever either input register updates; needs both present.
+  if ((register_key == REG_IDU_POWER || register_key == REG_IDU_CONFIG) &&
+      sensor_type_ == "static_pressure") {
+    auto *pw = parent_->get_register(device_addr, REG_IDU_POWER);
+    auto *cf = parent_->get_register(device_addr, REG_IDU_CONFIG);
+    if (pw && cf) {
+      float sp = parent_->idu_static_pressure_(*pw, *cf, static_k_);
+      if (!std::isnan(sp))
+        value = sp;
+    }
+  }
+
   // ODU (Outdoor Unit) passively snooped registers
   // Compressor RPM from register 0604. Two uint16 BE pairs per stage:
   //   target (commanded) at [0..1], actual (measured) at [2..3].
