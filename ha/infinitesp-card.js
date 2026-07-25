@@ -1875,17 +1875,9 @@ class InfinitespCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._form) {
-      this._form.hass = hass;
-      // The hub dropdown options depend on hass; rebuild the schema when the set
-      // of hub devices changes (not every tick, to avoid disrupting interaction).
-      const sig = this._hubDevices().map((o) => o.value).join(",");
-      if (sig !== this._devSig) {
-        this._devSig = sig;
-        this._form.schema = this._schema();
-      }
-    }
+    if (this._form) this._form.hass = hass;
     if (this._overrideForm) this._overrideForm.hass = hass;
+    this._refreshHubPicker();
   }
 
   // Hub devices for the picker: every top-level ESPHome device. A sub-device has
@@ -1898,26 +1890,55 @@ class InfinitespCardEditor extends HTMLElement {
       !!d &&
       Array.isArray(d.identifiers) &&
       d.identifiers.some((i) => Array.isArray(i) && i[0] === "esphome");
-    return Object.keys(hass.devices)
+    const topLevel = Object.keys(hass.devices)
       .map((id) => hass.devices[id])
-      .filter((d) => !d.via_device_id && isEsphome(d))
+      .filter((d) => d && !d.via_device_id);
+    // Prefer ESPHome hubs; if identifier detection ever misses, fall back to any
+    // top-level device that owns entities (so the picker is never wrongly empty).
+    let pool = topLevel.filter(isEsphome);
+    if (!pool.length && hass.entities) {
+      const hasEntities = (id) =>
+        Object.keys(hass.entities).some((eid) => hass.entities[eid].device_id === id);
+      pool = topLevel.filter((d) => hasEntities(d.id));
+    }
+    return pool
       .map((d) => ({ value: d.id, label: d.name_by_user || d.name || d.id }))
       .sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  // (Re)populate the native hub <select> from the current device list. Rendered
+  // outside ha-form (a native element) so its options always reflect the live
+  // registry — ha-form memoizes selector options built before hass is ready.
+  _refreshHubPicker() {
+    const sel = this._hubSelect;
+    if (!sel) return;
+    const opts = this._hubDevices();
+    const cur = this._config.device_id || "";
+    const sig = cur + "|" + opts.map((o) => o.value).join(",");
+    if (sig === this._hubSig) return; // avoid clobbering while the user interacts
+    this._hubSig = sig;
+    sel.innerHTML =
+      `<option value="">${opts.length ? "Select a device…" : "No InfinitESP devices found"}</option>` +
+      opts
+        .map(
+          (o) =>
+            `<option value="${o.value}"${o.value === cur ? " selected" : ""}>${o.label}</option>`
+        )
+        .join("");
+  }
+
+  _onHubChange(value) {
+    const cfg = Object.assign({}, this._config, {
+      device_id: value || undefined,
+    });
+    this._hubSig = null; // force the picker to re-sync selected value
+    this._emit(cfg);
+    this._renderZones();
   }
 
   _schema() {
     return [
       { name: "title", selector: { text: {} } },
-      // Only top-level ESPHome nodes (hubs) should be selectable — NOT the
-      // per-zone sub-devices (which are real ESPHome devices too). HA has no
-      // notion of an ESPHome *component* (everything is the `esphome`
-      // integration), and its device selector can't filter on the device
-      // hierarchy, so we build the list ourselves from the canonical signal:
-      // a sub-device has `via_device_id` set; a hub does not.
-      {
-        name: "device_id",
-        selector: { select: { mode: "dropdown", options: this._hubDevices() } },
-      },
       {
         name: "temperature_unit",
         selector: {
@@ -1969,6 +1990,24 @@ class InfinitespCardEditor extends HTMLElement {
 
   _render() {
     if (!this._form) {
+      // Hub device picker — a native <select> (not ha-form). Lists only top-level
+      // ESPHome hubs; zone sub-devices (which carry a via_device_id) are dropped.
+      this._hubRow = document.createElement("div");
+      this._hubRow.className = "inf-hub-row";
+      this._hubRow.innerHTML =
+        `<style>
+          .inf-hub-row { margin: 4px 0 8px; }
+          .inf-hub-row label { display:block; font-size:.82rem; color: var(--secondary-text-color); margin-bottom:4px; }
+          .inf-hub-row select { width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px;
+            border:1px solid var(--divider-color); background: var(--card-background-color, #fff);
+            color: var(--primary-text-color); font: inherit; }
+        </style>
+        <label>ESPHome device (InfinitESP hub)</label>`;
+      this._hubSelect = document.createElement("select");
+      this._hubSelect.addEventListener("change", (ev) => this._onHubChange(ev.target.value));
+      this._hubRow.appendChild(this._hubSelect);
+      this.appendChild(this._hubRow);
+
       // Main options.
       this._form = document.createElement("ha-form");
       this._form.computeLabel = (s) => EDITOR_LABELS[s.name] || s.name;
@@ -2003,9 +2042,9 @@ class InfinitespCardEditor extends HTMLElement {
     this._form.schema = this._schema();
     this._form.data = {
       title: this._config.title || "",
-      device_id: this._config.device_id || "",
       temperature_unit: this._config.temperature_unit || "F",
     };
+    this._refreshHubPicker();
     this._overrideForm.schema = this._overrideSchema();
     this._overrideForm.data = {
       outdoor_temp: e.outdoor_temp || "",
