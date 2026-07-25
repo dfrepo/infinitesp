@@ -51,6 +51,27 @@ def zone_device_id(hub_id, zone):
         return None
     return core.ID(f"{hub_key}_zone{zone}_dev", is_declaration=False, type=Device)
 
+
+# Words that should stay upper-cased (or specially-cased) in an auto-generated
+# entity name. Keeps friendly names readable when they are derived from a `type`
+# token instead of an explicit `name:` (e.g. blower_rpm -> "Blower RPM").
+_NAME_ACRONYMS = {
+    "odu": "ODU", "idu": "IDU", "sam": "SAM", "hpt": "HPT", "lat": "LAT",
+    "rpm": "RPM", "cfm": "CFM", "mac": "MAC", "ssid": "SSID", "url": "URL",
+    "id": "ID", "wifi": "WiFi",
+}
+
+
+def name_from_type(type_str):
+    """Human-friendly entity name from a `type` token. Title-cases each word but
+    keeps known acronyms upper-cased. Crucially slug(result) == type_str, so the
+    ESPHome object_id derived from this name equals the type (the binding
+    contract). Example: "odu_coil_temp" -> "ODU Coil Temp" (object_id
+    odu_coil_temp)."""
+    return " ".join(
+        _NAME_ACRONYMS.get(w, w.capitalize()) for w in str(type_str).split("_") if w
+    )
+
 # ZC zone sensor reference configuration
 CONF_ZC_ZONE_2 = "zc_zone_2"
 CONF_ZC_ZONE_3 = "zc_zone_3"

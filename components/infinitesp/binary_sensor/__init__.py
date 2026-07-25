@@ -8,6 +8,7 @@ from .. import (
     infinitesp_ns,
     register_infinitesp_entity,
     zone_device_id,
+    name_from_type,
 )
 
 CONF_ZONE = "zone"
@@ -34,7 +35,7 @@ def _default_name(config):
     """Default the entity name from its `type` when omitted (object_id == type).
     Explicit `name:` still wins (curated global binary sensors keep their labels)."""
     if CONF_NAME not in config and CONF_TYPE in config:
-        config[CONF_NAME] = config[CONF_TYPE].replace("_", " ").title()
+        config[CONF_NAME] = name_from_type(config[CONF_TYPE])
     return config
 
 

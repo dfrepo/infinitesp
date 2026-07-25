@@ -8,6 +8,7 @@ from .. import (
     infinitesp_ns,
     register_infinitesp_entity,
     zone_device_id,
+    name_from_type,
 )
 
 CONF_ZONE = "zone"
@@ -31,7 +32,7 @@ SENSOR_TYPES = {
     "blower_rpm_0404": {"key": "blower_rpm_0404", "unit": "RPM", "bus_class": 4, "disabled_by_default": True},
     "airflow_cfm": {"key": "airflow_cfm", "unit": "ft³/min", "bus_class": 4},
     # Blower motor power (register 0413, float32 BE watts) — the ECM load signal
-    "blower_watts": {"key": "blower_watts", "unit": "W", "bus_class": 4},
+    "blower_power": {"key": "blower_watts", "unit": "W", "bus_class": 4},
     # Static pressure (in. w.c.), derived in firmware from blower watts + airflow:
     # SP = static_k * watts / cfm. Coefficient configurable via `static_k`.
     "static_pressure": {"key": "static_pressure", "unit": "inH2O", "bus_class": 4, "accuracy": 2},
@@ -41,20 +42,20 @@ SENSOR_TYPES = {
     # additive. Infinitude OutdoorUnit.pm 0604: target_rpm / current_rpm.
     "compressor_rpm": {"key": "compressor_rpm", "unit": "RPM", "bus_class": 5},
     "target_compressor_rpm": {"key": "target_compressor_rpm", "unit": "RPM", "bus_class": 5},
-    "compressor_frequency": {"key": "compressor_frequency", "unit": "Hz", "bus_class": 5},
+    "odu_compressor_frequency": {"key": "compressor_frequency", "unit": "Hz", "bus_class": 5},
     # ODU expansion valve position from register 0608 byte [2] (0-100 percent).
     # Ramps over 10-15s on cycle transitions; reads 0 (off) or 100 (running) otherwise.
     "odu_expansion_valve": {"key": "odu_expansion_valve", "unit": "%", "bus_class": 5},
     "odu_commanded_stage": {"key": "odu_commanded_stage", "unit": "", "bus_class": 5},
     "odu_stage": {"key": "odu_stage", "unit": "", "bus_class": 5},
-    "odu_mode": {"key": "odu_operating_mode", "unit": "", "bus_class": 5},
+    "odu_operating_mode": {"key": "odu_operating_mode", "unit": "", "bus_class": 5},
     # ODU line voltage from register 0304 byte 7 (whole volts, state-independent)
     "odu_line_voltage": {"key": "odu_line_voltage", "unit": "V", "device_class": DEVICE_CLASS_VOLTAGE, "bus_class": 5},
     # ODU IEEE754 float32 values from register 061f
-    "odu_float_1": {"key": "odu_float_1", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "odu_float_2": {"key": "odu_float_2", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "odu_float_3": {"key": "odu_float_3", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "odu_float_4": {"key": "odu_float_4", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
+    "superheat_target": {"key": "odu_float_1", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
+    "superheat_actual": {"key": "odu_float_2", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
+    "subcooling_target": {"key": "odu_float_3", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
+    "subcooling_actual": {"key": "odu_float_4", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
     "odu_float_5": {"key": "odu_float_5", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
     "odu_float_6": {"key": "odu_float_6", "unit": "", "bus_class": 5},
     # ODU register 0302 temperature measurements
@@ -69,8 +70,8 @@ SENSOR_TYPES = {
     # LAT/HPT exist only on zone boards with those thermistor ports wired, so
     # they default to disabled (enable in HA if your board reports them).
     "zc_zone_temperature": {"key": "zc_zone_temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6},
-    "zc_lat": {"key": "zc_lat", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
-    "zc_hpt": {"key": "zc_hpt", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
+    "leaving_air_temperature": {"key": "zc_lat", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
+    "hpt_temperature": {"key": "zc_hpt", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
     # ZC commanded damper position per zone (register 0308, 0-15 -> 0-100%).
     # Graphable numeric complement to the damper cover; reads 0308 (populated on
     # both primary and secondary controllers) rather than the 0319 feedback.
@@ -104,7 +105,7 @@ def _default_name(config):
     (e.g. type: temperature -> "Temperature" -> object_id "temperature"). An
     explicit `name:` still wins (curated global sensors keep their labels)."""
     if CONF_NAME not in config and CONF_TYPE in config:
-        config[CONF_NAME] = config[CONF_TYPE].replace("_", " ").title()
+        config[CONF_NAME] = name_from_type(config[CONF_TYPE])
     return config
 
 
