@@ -192,6 +192,12 @@ infinitesp:
   uart_id: bus_uart           # Change to bus_cdcuart or bus_tcpuart if using those
   sam_address: 0x92               # Nonzero = SAM emulation active. 0x92 = SAM, 0x93 = FakeSAM (test), 0 = passive
   zone_controller_address: 0x60   # Nonzero = emulate ZC at 0x60. 0 = no emulation (still passively monitors a real ZC if present)
+  # Per-zone Home Assistant sub-devices. Each entity carrying a matching `zone:`
+  # is grouped under these devices in HA (no per-entity device_id needed). The
+  # names are yours; entities on a zone inherit the device name as their prefix.
+  zones:
+    1: "Zone 1"
+    2: "Zone 2"
   # flow_control_pin: GPIO13   # RS485 DE/RE control (needed for some transceivers)
   # status_light_id: rgb_led  # Status LED reference (see light: section below)
 
@@ -582,6 +588,33 @@ select:
     name: "Zone 1 Fan Mode"
     type: fan_mode
     zone: 1
+
+# ──────────────────────────────────────────────
+# Numbers — per-zone heat/cool setpoints (read-write, graphable)
+# ──────────────────────────────────────────────
+# Editable setpoint entities that Home Assistant also records for history graphs
+# (unlike the climate entity's target_temperature_* attributes). `type` is the
+# contract: it selects the setpoint AND defaults the entity's object_id, so a
+# dashboard/card can bind by type regardless of the display name. Add one
+# heat_target and one cool_target per active zone; each auto-groups under its
+# zone sub-device (see `zones:` on the hub).
+number:
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    type: heat_target
+    zone: 1
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    type: cool_target
+    zone: 1
+#  - platform: infinitesp
+#    infinitesp_id: infinitesp_hub
+#    type: heat_target
+#    zone: 2
+#  - platform: infinitesp
+#    infinitesp_id: infinitesp_hub
+#    type: cool_target
+#    zone: 2
 
 # ──────────────────────────────────────────────
 # Text sensors

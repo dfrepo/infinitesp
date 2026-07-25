@@ -1,16 +1,19 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 import logging
-from esphome import pins
+from esphome import pins, core
 from esphome.components import uart
 from esphome.components import time as time_
 from esphome.const import CONF_ID
+from esphome.helpers import fnv1a_32bit_hash
 
 _LOGGER = logging.getLogger(__name__)
 
+Device = cg.esphome_ns.class_("Device")
+
 CODEOWNERS = ["@nebulous"]
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["climate", "sensor", "select", "text_sensor", "binary_sensor", "cover", "time"]
+AUTO_LOAD = ["climate", "sensor", "select", "text_sensor", "binary_sensor", "cover", "number", "time"]
 MULTI_CONF = True
 
 CONF_INFINITESP_ID = "infinitesp_id"
@@ -27,6 +30,26 @@ CONF_FLOW_CONTROL_PIN = "flow_control_pin"
 CONF_TIME_ID = "time_id"
 CONF_ZONE_CONTROLLER_ADDRESS = "zone_controller_address"
 CONF_TEMPERATURE_UNIT = "temperature_unit"
+CONF_ZONES = "zones"
+
+# Registry of declared zones per hub, populated during validation so entity
+# platforms can decide (in their own to_code) whether to auto-attach to a zone
+# sub-device. Keyed by the hub's id string.
+_HUB_ZONES = {}
+
+
+def zone_device_id(hub_id, zone):
+    """Return a core.ID REFERENCE to the hub's zone sub-device, or None if not
+    declared. Accepts hub_id as a resolved core.ID or a raw id string (entity
+    platforms call this pre-schema, where infinitesp_id is still a string). The
+    returned reference resolves against the declared ID the hub stored in its
+    config (see _register_zones). Returns None when the zone isn't declared.
+    """
+    hub_key = hub_id.id if hasattr(hub_id, "id") else str(hub_id)
+    zones = _HUB_ZONES.get(hub_key)
+    if not zones or zone not in zones:
+        return None
+    return core.ID(f"{hub_key}_zone{zone}_dev", is_declaration=False, type=Device)
 
 # ZC zone sensor reference configuration
 CONF_ZC_ZONE_2 = "zc_zone_2"
@@ -101,6 +124,24 @@ def _validate_status_led(config):
     return config
 
 
+def _register_zones(config):
+    """Record declared zones and create declared device IDs so entity platforms
+    can auto-attach. The IDs are stored in config (under CONF_ZONES as {num:
+    (name, ID)}) so the ID-collection pass (iter_ids) registers them as declared
+    — making them resolvable by entities' device_id references."""
+    if CONF_ZONES in config:
+        hub_key = str(config[CONF_ID])
+        registry = {}
+        new_zones = {}
+        for num, zname in config[CONF_ZONES].items():
+            dev_id = core.ID(f"{hub_key}_zone{num}_dev", is_declaration=True, type=Device)
+            new_zones[num] = {"name": zname, "id": dev_id}
+            registry[num] = zname
+        config[CONF_ZONES] = new_zones  # {num: {name, id}} — ID now walkable by iter_ids
+        _HUB_ZONES[hub_key] = registry
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -134,11 +175,15 @@ CONFIG_SCHEMA = cv.All(
             # fallback, unlike zones).
             cv.Optional(CONF_ZC_LAT): ZC_ZONE_SCHEMA,
             cv.Optional(CONF_ZC_HPT): ZC_ZONE_SCHEMA,
+            # Per-zone HA sub-devices: {zone_number: "Display Name"}. Entities
+            # with a matching `zone:` auto-group under these in Home Assistant.
+            cv.Optional(CONF_ZONES): cv.Schema({cv.int_range(min=1, max=8): cv.string}),
         }
     ).extend(cv.COMPONENT_SCHEMA).extend(uart.UART_DEVICE_SCHEMA),
     _validate_addresses,
     _validate_status_led,
     _validate_zc_config,
+    _register_zones,
 )
 
 INFINITESP_DEVICE_SCHEMA = cv.Schema(
@@ -157,6 +202,19 @@ async def register_infinitesp_entity(var, config):
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(var.set_sam_address(config[CONF_SAM_ADDRESS]))
+
+    # Per-zone HA sub-devices: `zones:` maps zone number -> (name, declared ID)
+    # after _register_zones. Each entity with a matching `zone:` auto-attaches
+    # to these via device_id (see _inject_device_id in the platforms).
+    if CONF_ZONES in config:
+        zones = config[CONF_ZONES]
+        cg.add_define("USE_DEVICES")
+        cg.add_define("ESPHOME_DEVICE_COUNT", len(zones))
+        for num, z in zones.items():
+            dev = cg.new_Pvariable(z["id"])
+            cg.add(dev.set_device_id(fnv1a_32bit_hash(z["id"].id)))
+            cg.add(dev.set_name(z["name"]))
+            cg.add(cg.App.register_device(dev))
 
     if config[CONF_ZONE_CONTROLLER_ADDRESS] != 0:
         cg.add(var.set_zc_address(config[CONF_ZONE_CONTROLLER_ADDRESS]))

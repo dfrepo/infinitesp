@@ -85,13 +85,15 @@ const ZONE_METRICS = {
   temp: { label: "Temp", icon: "mdi:thermometer" },
   humidity: { label: "Humidity", icon: "mdi:water-percent" },
   damper: { label: "Damper Open", icon: "mdi:valve" },
+  heat_target: { label: "Heat To", icon: "mdi:fire" },
+  cool_target: { label: "Cool To", icon: "mdi:snowflake" },
 };
 
 // Default feature order per section (used when `sections:` is not configured).
 const DEFAULT_SECTIONS = {
   odu: ["outdoor_temp", "coil_temp", "stage", "line_voltage"],
   idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure"],
-  zoning: ["temp", "humidity", "damper"],
+  zoning: ["temp", "humidity", "damper", "heat_target", "cool_target"],
 };
 
 // Valid feature keys for a section (odu/idu from FEATURES, zoning from metrics).
@@ -162,11 +164,23 @@ const ZONE_ENTITY_IDS = (hass, zone, prefix) => {
     const c = `cover.${stem}_damper`;
     damper = has(c) && !has(s) ? c : s;
   }
+  // Setpoint numbers live on the per-zone HA SUB-DEVICE, so their entity_id is
+  // prefixed by the zone/device slug alone (e.g. number.floor_3_heat_target),
+  // NOT the node-prefixed stem used by the main-node temp/humidity sensors.
+  // Prefer the sub-device slug id; fall back to the node-prefixed stem so this
+  // still resolves if the targets are placed on the main node instead.
+  const numId = (metric) => {
+    const bySlug = slug ? `number.${slug}_${metric}` : "";
+    const byStem = stem ? `number.${stem}_${metric}` : "";
+    return has(bySlug) ? bySlug : has(byStem) ? byStem : bySlug || byStem;
+  };
   return {
     name: zone.name,
     temp: zone.temp || (stem ? `sensor.${stem}_temperature` : ""),
     humidity: zone.humidity || (stem ? `sensor.${stem}_humidity` : ""),
     damper: damper || "",
+    heat_target: zone.heat_target || numId("heat_target"),
+    cool_target: zone.cool_target || numId("cool_target"),
   };
 };
 
@@ -314,6 +328,17 @@ class InfinitespCard extends HTMLElement {
     this._bound = true;
     // Delegated click handling for graphable tiles + chart controls.
     this.addEventListener("click", (ev) => {
+      // Setpoint adjust: open the custom card-styled slider dialog.
+      const sp = ev.target.closest("[data-setpoint]");
+      if (sp) {
+        ev.stopPropagation();
+        this._openSetpoint(
+          sp.getAttribute("data-setpoint"),
+          sp.getAttribute("data-setpoint-label") || "",
+          sp.getAttribute("data-setpoint-kind") || "heat"
+        );
+        return;
+      }
       const range = ev.target.closest("[data-range]");
       if (range) {
         this._chart.range = range.getAttribute("data-range");
@@ -761,7 +786,13 @@ class InfinitespCard extends HTMLElement {
     // so plain state wouldn't reflect position changes).
     (this._config.zones || []).forEach((z) => {
       const rz = ZONE_ENTITY_IDS(this._hass, z, this._prefix);
-      parts.push(this._state(rz.temp), this._state(rz.humidity), String(this._damperPct(rz.damper)));
+      parts.push(
+        this._state(rz.temp),
+        this._state(rz.humidity),
+        String(this._damperPct(rz.damper)),
+        this._state(rz.heat_target),
+        this._state(rz.cool_target)
+      );
     });
     return parts.join("|");
   }
@@ -774,14 +805,214 @@ class InfinitespCard extends HTMLElement {
     return `<a class="sec-model" href="${url}" target="_blank" rel="noopener noreferrer" title="Search this model number">${m}<ha-icon class="ext" icon="mdi:open-in-new"></ha-icon></a>`;
   }
 
-  // Temperature as a display string (applies C->F when configured).
+  // True when temperatures should be displayed in °F. Follows the card's
+  // `temperature_unit` config; when that's unset/auto, follows the Home
+  // Assistant system unit (so it tracks the user's locale/component setup).
+  _wantF() {
+    const cfg = this._config.temperature_unit;
+    if (cfg === "F") return true;
+    if (cfg === "C") return false;
+    const sys =
+      this._hass && this._hass.config && this._hass.config.unit_system
+        ? this._hass.config.unit_system.temperature
+        : "";
+    return String(sys).includes("F");
+  }
+
+  // Temperature as a display string (converts to the display unit).
   _tempStr(id) {
     const c = this._num(id);
     if (c === null) return "—";
     const u = this._unit(id);
-    if (this._config.temperature_unit === "F" && u.includes("C"))
-      return TEMP_C_TO_F(c).toFixed(1) + "°";
+    const wantF = this._wantF();
+    if (wantF && u.includes("C")) return TEMP_C_TO_F(c).toFixed(1) + "°";
+    if (!wantF && u.includes("F")) return ((c - 32) * (5 / 9)).toFixed(1) + "°";
     return c.toFixed(1) + "°";
+  }
+
+  // ---- setpoint adjust dialog (custom, card-styled) -----------------------
+  // A modal with a vertical slider bound to a number entity. Shows the live
+  // reading in the display unit, Apply (commit) and Cancel (revert to the value
+  // present when opened). The DOM is built once; drag/nudge patch it in place
+  // (no full re-render) so dragging is smooth.
+  _openSetpoint(entityId, label, kind) {
+    const s = this._stateObj(entityId);
+    if (!s) return;
+    const u = s.attributes.unit_of_measurement || "";
+    const wantF = this._wantF();
+    const cToF = wantF && u.includes("C");
+    const fToC = !wantF && u.includes("F");
+    const toDisp = (v) => (cToF ? TEMP_C_TO_F(v) : fToC ? (v - 32) * (5 / 9) : v);
+    const toNative = (d) => (cToF ? (d - 32) * (5 / 9) : fToC ? TEMP_C_TO_F(d) : d);
+    const cur = Number(s.state);
+    const nMin = typeof s.attributes.min === "number" ? s.attributes.min : toNative(wantF ? 40 : 4);
+    const nMax = typeof s.attributes.max === "number" ? s.attributes.max : toNative(wantF ? 99 : 37);
+    const dmin = Math.round(toDisp(nMin));
+    const dmax = Math.round(toDisp(nMax));
+    const orig = Math.round(toDisp(cur));
+    this._sp = {
+      entity: entityId,
+      label,
+      kind: kind || "heat",
+      unit: wantF ? "°F" : cToF || fToC ? (wantF ? "°F" : "°C") : u || (wantF ? "°F" : "°C"),
+      min: dmin,
+      max: dmax,
+      orig,
+      val: Math.max(dmin, Math.min(dmax, orig)),
+      toNative,
+    };
+
+    if (!this._spEl) {
+      const el = document.createElement("div");
+      el.className = "infsp-modal-root infsp-sp-root";
+      document.body.appendChild(el);
+      this._spEl = el;
+      this._spKey = (ev) => {
+        if (ev.key === "Escape") this._closeSetpoint();
+        else if (ev.key === "Enter") this._applySetpoint();
+      };
+    }
+    // Build the dialog DOM once per open.
+    const sp = this._sp;
+    this._spEl.innerHTML = `${this._modalStyles()}${this._setpointStyles()}
+      <div class="modal-backdrop" data-sp-cancel></div>
+      <div class="modal-box sp-box ${sp.kind}" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <span class="modal-title">${sp.label}</span>
+          <ha-icon icon="mdi:close" data-sp-cancel title="Cancel"></ha-icon>
+        </div>
+        <div class="sp-body">
+          <div class="sp-reading"><span class="sp-num">${sp.val}</span><span class="sp-unit">${sp.unit}</span></div>
+          <div class="sp-adjust">
+            <button class="sp-nudge" data-sp-step="1" title="Warmer">+</button>
+            <div class="sp-slider" data-sp-track>
+              <div class="sp-max">${sp.max}°</div>
+              <div class="sp-track">
+                <div class="sp-fill"></div>
+                <div class="sp-thumb"></div>
+              </div>
+              <div class="sp-min">${sp.min}°</div>
+            </div>
+            <button class="sp-nudge" data-sp-step="-1" title="Cooler">−</button>
+          </div>
+        </div>
+        <div class="sp-actions">
+          <button class="sp-act cancel" data-sp-cancel>Cancel</button>
+          <button class="sp-act apply" data-sp-apply>Apply</button>
+        </div>
+      </div>`;
+
+    // Cache the elements we patch during interaction.
+    this._spNum = this._spEl.querySelector(".sp-num");
+    this._spFill = this._spEl.querySelector(".sp-fill");
+    this._spThumb = this._spEl.querySelector(".sp-thumb");
+    this._spApply = this._spEl.querySelector(".sp-act.apply");
+    const track = this._spEl.querySelector(".sp-track");
+
+    // One click listener for buttons/backdrop.
+    this._spEl.onclick = (ev) => {
+      if (ev.target.closest("[data-sp-cancel]")) return this._closeSetpoint();
+      if (ev.target.closest("[data-sp-apply]")) return this._applySetpoint();
+      const step = ev.target.closest("[data-sp-step]");
+      if (step) {
+        this._setSpVal(this._sp.val + Number(step.getAttribute("data-sp-step")));
+      }
+    };
+
+    // Drag on the track — patches in place (no re-render), so it slides.
+    const valFromY = (clientY) => {
+      const r = track.getBoundingClientRect();
+      let f = 1 - (clientY - r.top) / r.height; // top = max
+      f = Math.max(0, Math.min(1, f));
+      return Math.round(this._sp.min + f * (this._sp.max - this._sp.min));
+    };
+    track.onpointerdown = (ev) => {
+      ev.preventDefault();
+      track.setPointerCapture && track.setPointerCapture(ev.pointerId);
+      this._setSpVal(valFromY(ev.clientY));
+      const move = (e) => this._setSpVal(valFromY(e.clientY));
+      const up = () => {
+        track.removeEventListener("pointermove", move);
+        track.removeEventListener("pointerup", up);
+      };
+      track.addEventListener("pointermove", move);
+      track.addEventListener("pointerup", up);
+    };
+
+    document.addEventListener("keydown", this._spKey);
+    this._spEl.style.display = "block";
+    this._paintSp();
+  }
+
+  // Set the working value (clamped) and repaint the changed bits in place.
+  _setSpVal(v) {
+    const sp = this._sp;
+    if (!sp) return;
+    const nv = Math.max(sp.min, Math.min(sp.max, Math.round(v)));
+    if (nv === sp.val) return;
+    sp.val = nv;
+    this._paintSp();
+  }
+
+  // Patch reading, fill, thumb, and Apply state — no innerHTML rebuild.
+  _paintSp() {
+    const sp = this._sp;
+    if (!sp || !this._spNum) return;
+    const pct = ((sp.val - sp.min) / (sp.max - sp.min || 1)) * 100;
+    this._spNum.textContent = sp.val;
+    this._spFill.style.height = pct + "%";
+    this._spThumb.style.bottom = pct + "%";
+    const changed = sp.val !== sp.orig;
+    this._spApply.classList.toggle("on", changed);
+    this._spApply.toggleAttribute("disabled", !changed);
+  }
+
+  _applySetpoint() {
+    const sp = this._sp;
+    if (!sp) return;
+    if (sp.val !== sp.orig) {
+      this._hass.callService("number", "set_value", {
+        entity_id: sp.entity,
+        value: sp.toNative(sp.val),
+      });
+    }
+    this._closeSetpoint();
+  }
+
+  _closeSetpoint() {
+    // Cancel/close discards this._sp without calling the service (revert).
+    if (this._spEl) this._spEl.style.display = "none";
+    if (this._spKey) document.removeEventListener("keydown", this._spKey);
+    this._sp = null;
+  }
+
+  // ---- large interactive chart modal --------------------------------------
+
+  // Editable setpoint cell: the whole cell opens the inline history graph (like
+  // other metrics, with a light chart-icon hint on the right); the accent pencil
+  // button next to the reading opens the custom slider dialog. Renders "—" when
+  // the entity is absent.
+  _setpointCell(icon, id, label) {
+    if (!id || !this._stateObj(id))
+      return `<span class="zone-metric zv" title="${label}">
+        <ha-icon icon="${icon}"></ha-icon>
+        <span class="zm-body"><span class="zm-val">—</span><span class="zm-label">${label}</span></span>
+      </span>`;
+    const gl = label.replace(/"/g, "&quot;");
+    const kind = icon.includes("snowflake") ? "cool" : "heat";
+    return `<span class="zone-metric setpoint zv clickable" data-graph="${id}" data-graph-label="${gl}" title="${label}">
+        <ha-icon icon="${icon}"></ha-icon>
+        <span class="zm-body">
+          <span class="zm-text">
+            <span class="zm-val">${this._tempStr(id)}</span>
+            <span class="zm-label">${label}</span>
+          </span>
+          <button class="sp-edit ${kind}" data-setpoint="${id}" data-setpoint-label="${gl}" data-setpoint-kind="${kind}" title="Adjust ${label}">
+            <ha-icon icon="mdi:pencil"></ha-icon>
+          </button>
+        </span>
+        <ha-icon class="g-ic" icon="mdi:chart-line"></ha-icon>
+      </span>`;
   }
 
   // Damper percent from either a cover entity (current_position attribute) or a
@@ -837,6 +1068,13 @@ class InfinitespCard extends HTMLElement {
       humidity: zv("mdi:water-percent", hum === null ? "—" : hum.toFixed(0) + "%", z.humidity, "Humidity"),
       damper: dampCell,
     };
+    // Setpoint targets (number entities): editable inline via −/+ steppers,
+    // graphable by clicking the value. Only rendered when the entity exists.
+    const has = (id) => id && this._hass && this._hass.states[id];
+    if (has(z.heat_target))
+      cells.heat_target = this._setpointCell("mdi:fire", z.heat_target, "Heat To");
+    if (has(z.cool_target))
+      cells.cool_target = this._setpointCell("mdi:snowflake", z.cool_target, "Cool To");
     const metrics = this._sectionFeatures("zoning").map((k) => cells[k] || "").join("");
     return `<div class="zone">
       <div class="zone-head">${z.name || "Zone"}</div>
@@ -1158,7 +1396,7 @@ class InfinitespCard extends HTMLElement {
     const zoneIds = [];
     zones.forEach((z) => {
       const rz = ZONE_ENTITY_IDS(this._hass, z, this._prefix);
-      zoneIds.push(rz.temp, rz.humidity);
+      zoneIds.push(rz.temp, rz.humidity, rz.heat_target, rz.cool_target);
       if (this._damperGraphable(rz.damper)) zoneIds.push(rz.damper);
     });
     const outdoorOwns = this._sectionEntityIds("odu").includes(this._chart.entity);
@@ -1257,6 +1495,14 @@ class InfinitespCard extends HTMLElement {
       .zone-metric.clickable:hover ha-icon { color: var(--primary-color); }
       .zone-metric .g-ic { --mdc-icon-size:14px; color: var(--secondary-text-color); opacity:.35; flex:0 0 auto; margin-left:auto; align-self:flex-start; }
       .zone-metric.clickable:hover .g-ic { opacity:.85; color: var(--primary-color); }
+      .zone-metric.setpoint .zm-body { flex-direction:row; align-items:center; gap:10px; }
+      .zone-metric.setpoint .zm-text { display:flex; flex-direction:column; line-height:1.15; min-width:0; }
+      .sp-edit { flex:0 0 auto; width:32px; height:32px; border-radius:9px; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; background: color-mix(in srgb, var(--sp-edit-accent) 20%, transparent); color: var(--sp-edit-accent); transition: background .12s ease, color .12s ease, transform .06s ease; }
+      .sp-edit.heat { --sp-edit-accent: #e5484d; }
+      .sp-edit.cool { --sp-edit-accent: #2f7de5; }
+      .sp-edit ha-icon { --mdc-icon-size:19px; color: inherit; }
+      .sp-edit:hover { background: var(--sp-edit-accent); color:#fff; }
+      .sp-edit:active { transform: translateY(1px); }
       .dmeter { position:relative; width:100%; height:22px; border-radius:6px; background: var(--divider-color); overflow:hidden; box-sizing:border-box; }
       .dmeter.empty { display:flex; align-items:center; justify-content:center; color: var(--secondary-text-color); background:transparent; }
       .dmeter .dfill { position:absolute; left:0; top:0; bottom:0; background: var(--info-color, #039be5); }
@@ -1354,6 +1600,34 @@ class InfinitespCard extends HTMLElement {
       }
       .infsp-modal-root .xh-tip b { font-size:.92rem; }
       .infsp-modal-root .xh-tip span { font-size:.72rem; color: var(--secondary-text-color); }
+    </style>`;
+  }
+
+  _setpointStyles() {
+    return `<style>
+      .infsp-sp-root .sp-box { width:min(320px, 92vw); padding:18px 20px 16px; --sp-accent: var(--primary-color); }
+      .infsp-sp-root .sp-box.heat { --sp-accent: #e5484d; }
+      .infsp-sp-root .sp-box.cool { --sp-accent: #2f7de5; }
+      .infsp-sp-root .sp-body { display:flex; flex-direction:column; align-items:center; gap:16px; padding:8px 0 4px; }
+      .infsp-sp-root .sp-reading { display:flex; align-items:baseline; justify-content:center; gap:3px; }
+      .infsp-sp-root .sp-num { font-size:2.8rem; font-weight:700; line-height:1; color: var(--sp-accent); }
+      .infsp-sp-root .sp-unit { font-size:1.15rem; font-weight:600; color: var(--secondary-text-color); }
+      .infsp-sp-root .sp-adjust { display:flex; flex-direction:column; align-items:center; gap:12px; }
+      .infsp-sp-root .sp-slider { display:flex; flex-direction:column; align-items:center; gap:6px; }
+      .infsp-sp-root .sp-max, .infsp-sp-root .sp-min { font-size:.72rem; color: var(--secondary-text-color); }
+      .infsp-sp-root .sp-track { position:relative; width:46px; height:200px; border-radius:23px; background: var(--divider-color); cursor:pointer; touch-action:none; }
+      .infsp-sp-root .sp-fill { position:absolute; left:0; right:0; bottom:0; border-radius:23px; background: linear-gradient(0deg, var(--sp-accent), color-mix(in srgb, var(--sp-accent) 55%, #fff)); }
+      .infsp-sp-root .sp-thumb { position:absolute; left:50%; width:54px; height:54px; border-radius:50%; transform:translate(-50%,50%); background: var(--card-background-color); border:4px solid var(--sp-accent); box-shadow:0 2px 10px rgba(0,0,0,.4); cursor:grab; pointer-events:none; }
+      .infsp-sp-root .sp-nudge { width:46px; height:42px; border-radius:12px; border:none; cursor:pointer; font-size:1.5rem; font-weight:700; line-height:1; color: var(--primary-text-color); background: var(--divider-color); transition: background .12s ease, color .12s ease; }
+      .infsp-sp-root .sp-nudge:hover { background: color-mix(in srgb, var(--sp-accent) 40%, var(--divider-color)); color: var(--sp-accent); }
+      .infsp-sp-root .sp-nudge:active { transform: translateY(1px); }
+      .infsp-sp-root .sp-actions { display:flex; gap:10px; margin-top:18px; }
+      .infsp-sp-root .sp-act { flex:1; padding:11px 0; border-radius:12px; border:none; font:inherit; font-size:.95rem; font-weight:600; cursor:pointer; transition: background .12s ease, opacity .12s ease; }
+      .infsp-sp-root .sp-act.cancel { background: var(--divider-color); color: var(--primary-text-color); }
+      .infsp-sp-root .sp-act.cancel:hover { background: color-mix(in srgb, var(--error-color, #db4437) 22%, var(--divider-color)); }
+      .infsp-sp-root .sp-act.apply { background: color-mix(in srgb, var(--sp-accent) 28%, var(--divider-color)); color: var(--secondary-text-color); }
+      .infsp-sp-root .sp-act.apply.on { background: var(--sp-accent); color:#fff; }
+      .infsp-sp-root .sp-act[disabled] { cursor:default; opacity:.55; }
     </style>`;
   }
 
