@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import climate
-from esphome.const import CONF_ID, CONF_DEVICE_ID
+from esphome.const import CONF_ID, CONF_NAME, CONF_DEVICE_ID
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
@@ -13,6 +13,14 @@ from .. import (
 CONF_ZONE = "zone"
 
 InfinitESPClimate = infinitesp_ns.class_("InfinitESPClimate", climate.Climate, InfinitESPEntity)
+
+
+def _default_name(config):
+    """A climate has no `type:` field — its identity IS the component type. Default
+    the name to "Climate" when omitted so object_id == "climate" (climate.<zone>_climate)."""
+    if CONF_NAME not in config:
+        config[CONF_NAME] = "Climate"
+    return config
 
 
 def _inject_device_id(config):
@@ -27,6 +35,7 @@ def _inject_device_id(config):
 
 
 CONFIG_SCHEMA = cv.All(
+    _default_name,
     _inject_device_id,
     climate.climate_schema(InfinitESPClimate).extend(
         {

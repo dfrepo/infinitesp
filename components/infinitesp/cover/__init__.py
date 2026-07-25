@@ -2,7 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
 from esphome.components import cover
-from esphome.const import CONF_ID, CONF_DEVICE_ID
+from esphome.const import CONF_ID, CONF_NAME, CONF_DEVICE_ID
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
@@ -27,9 +27,17 @@ CONF_ZONE = "zone"
 CONF_ON_CHANGE = "on_change"
 
 
+def _default_name(config):
+    """A cover has no `type:` field — its identity IS the component type. Default
+    the name to "Cover" when omitted so object_id == "cover" (cover.<zone>_cover)."""
+    if CONF_NAME not in config:
+        config[CONF_NAME] = "Cover"
+    return config
+
+
 def _inject_device_id(config):
     """Attach the zone damper to its HA sub-device BEFORE the base schema's
-    duplicate-name validator runs, so every zone can share the name "Damper"."""
+    duplicate-name validator runs, so every zone can share the name "Cover"."""
     if CONF_ZONE in config:
         dev_id = zone_device_id(config.get(CONF_INFINITESP_ID), config[CONF_ZONE])
         if dev_id is not None:
@@ -38,6 +46,7 @@ def _inject_device_id(config):
 
 
 CONFIG_SCHEMA = cv.All(
+    _default_name,
     _inject_device_id,
     cover.cover_schema(InfinitESPCover).extend(
         {

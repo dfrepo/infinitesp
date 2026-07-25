@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
-from esphome.const import CONF_ID, CONF_TYPE, CONF_DISABLED_BY_DEFAULT, CONF_ACCURACY_DECIMALS, CONF_DEVICE_ID, STATE_CLASS_MEASUREMENT, DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLTAGE
+from esphome.const import CONF_ID, CONF_NAME, CONF_TYPE, CONF_DISABLED_BY_DEFAULT, CONF_ACCURACY_DECIMALS, CONF_DEVICE_ID, STATE_CLASS_MEASUREMENT, DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLTAGE
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
@@ -99,6 +99,15 @@ SENSOR_TYPES = {
     "odu_poweron_hours": {"key": "odu_poweron_hours", "unit": "h", "bus_class": 5},
 }
 
+def _default_name(config):
+    """Default the entity name from its `type` when omitted, so object_id == type
+    (e.g. type: temperature -> "Temperature" -> object_id "temperature"). An
+    explicit `name:` still wins (curated global sensors keep their labels)."""
+    if CONF_NAME not in config and CONF_TYPE in config:
+        config[CONF_NAME] = config[CONF_TYPE].replace("_", " ").title()
+    return config
+
+
 def _inject_device_id(config):
     """Pre-schema: attach per-zone sensors to their zone HA sub-device (before the
     base schema's duplicate-name validator, so every zone can share e.g. the name
@@ -124,6 +133,7 @@ def _apply_sensor_type(config):
 
 
 CONFIG_SCHEMA = cv.All(
+    _default_name,
     _inject_device_id,
     cv.Schema({cv.Required(CONF_TYPE): cv.one_of(*SENSOR_TYPES, lower=True)}).extend(
         sensor.sensor_schema(

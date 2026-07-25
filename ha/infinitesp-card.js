@@ -248,12 +248,14 @@ const ZONE_ENTITY_IDS = (hass, zone, prefix) => {
     const byStem = stem ? `${domain}.${stem}_${metric}` : "";
     return has(byStem) ? byStem : bySlug || byStem;
   };
-  // Damper: prefer the numeric _damper_position sensor (graphable), else the cover.
+  // Damper: prefer the numeric _damper_position sensor (graphable), else the cover
+  // (object_id "cover" now; "damper" was the old name — kept as a legacy fallback).
   let damper = zone.damper;
   if (!damper) {
     const s = mid("sensor", "damper_position");
-    const c = mid("cover", "damper");
-    damper = has(s) ? s : has(c) ? c : s || c;
+    const c = mid("cover", "cover");
+    const cLegacy = mid("cover", "damper");
+    damper = has(s) ? s : has(c) ? c : has(cLegacy) ? cLegacy : s || c || cLegacy;
   }
   return {
     name: zone.name,

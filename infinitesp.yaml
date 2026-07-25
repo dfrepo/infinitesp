@@ -227,7 +227,6 @@ infinitesp:
 climate:
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Climate"
     zone: 1
   # - platform: infinitesp
   #   infinitesp_id: infinitesp_hub
@@ -250,7 +249,6 @@ climate:
 cover:
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Damper"
     zone: 1
     device_class: damper
   # - platform: infinitesp
@@ -285,12 +283,10 @@ sensor:
   # Zone environment - add temperature + humidity for each active zone
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Temperature"
     type: temperature
     zone: 1
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Humidity"
     type: humidity
     zone: 1
 
@@ -557,7 +553,6 @@ binary_sensor:
   # state). NOTE: this is the schedule/away state, NOT a motion/presence sensor.
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Occupancy"
     type: occupancy
     zone: 1
   - platform: status
@@ -626,12 +621,10 @@ text_sensor:
   # Zone info - add zone_name for each active zone
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Name"
     type: zone_name
     zone: 1
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Hold State"
     type: hold_state
     zone: 1
 

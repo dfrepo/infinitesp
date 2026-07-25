@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import binary_sensor
-from esphome.const import CONF_ID, CONF_TYPE, CONF_DEVICE_CLASS, CONF_DEVICE_ID
+from esphome.const import CONF_ID, CONF_NAME, CONF_TYPE, CONF_DEVICE_CLASS, CONF_DEVICE_ID
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
@@ -30,6 +30,14 @@ BINARY_SENSOR_TYPES = {
     "active_fault": {"bus_class": 0, "device_class": "problem"},
 }
 
+def _default_name(config):
+    """Default the entity name from its `type` when omitted (object_id == type).
+    Explicit `name:` still wins (curated global binary sensors keep their labels)."""
+    if CONF_NAME not in config and CONF_TYPE in config:
+        config[CONF_NAME] = config[CONF_TYPE].replace("_", " ").title()
+    return config
+
+
 def _inject_device_id(config):
     """Pre-schema: attach per-zone binary sensors (occupancy) to their zone HA
     sub-device before the base schema's duplicate-name validator runs."""
@@ -41,6 +49,7 @@ def _inject_device_id(config):
 
 
 CONFIG_SCHEMA = cv.All(
+    _default_name,
     _inject_device_id,
     binary_sensor.binary_sensor_schema(InfinitESPBinarySensor).extend(
         {
