@@ -1888,19 +1888,37 @@ class InfinitespCardEditor extends HTMLElement {
     if (this._overrideForm) this._overrideForm.hass = hass;
   }
 
-  // Top-level ESPHome devices (hubs) only — exclude zone sub-devices, which carry
-  // a `via_device_id` pointing at their hub. Returns [{value: id, label}] for a
-  // `select` selector. HA can't natively filter the device picker by our
-  // component or by device hierarchy, so we derive the list here.
+  // Top-level ESPHome devices (hubs) that are InfinitESP controllers. Two gates:
+  //  1. hierarchy: a hub has no `via_device_id` (zone sub-devices do -> excluded).
+  //  2. identity: the device owns a main-node entity unique to this component
+  //     (the outdoor-unit / air-handler / zoning MODEL serials, the global
+  //     System Mode select, or an ODU sensor). This is the reliable "is this an
+  //     InfinitESP hub" signal — HA can't filter the native picker by a specific
+  //     entity, but here we have the full registry. Falls back to all top-level
+  //     ESPHome hubs if none carry a signature (e.g. those entities disabled).
   _hubDevices() {
     const hass = this._hass;
     if (!hass || !hass.devices) return [];
     const isEsphome = (d) =>
       Array.isArray(d.identifiers) &&
       d.identifiers.some((i) => Array.isArray(i) && i[0] === "esphome");
-    return Object.keys(hass.devices)
+    const tops = Object.keys(hass.devices)
       .map((id) => hass.devices[id])
-      .filter((d) => d && !d.via_device_id && isEsphome(d))
+      .filter((d) => d && !d.via_device_id && isEsphome(d));
+    // Signature main-node object_ids (matched as entity_id suffixes).
+    const SIG = [
+      "_outdoor_unit_model", "_furnace_model", "_zoning_board_model",
+      "_system_mode", "_odu_line_voltage", "_odu_coil_temp",
+    ];
+    const hasSig = (devId) =>
+      !!hass.entities &&
+      Object.keys(hass.entities).some(
+        (eid) =>
+          hass.entities[eid].device_id === devId && SIG.some((s) => eid.endsWith(s))
+      );
+    const infsp = tops.filter((d) => hasSig(d.id));
+    const pool = infsp.length ? infsp : tops; // don't leave the picker empty
+    return pool
       .map((d) => ({ value: d.id, label: d.name_by_user || d.name || d.id }))
       .sort((a, b) => a.label.localeCompare(b.label));
   }
