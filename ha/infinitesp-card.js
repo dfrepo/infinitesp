@@ -1875,19 +1875,48 @@ class InfinitespCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._form) this._form.hass = hass;
+    if (this._form) {
+      this._form.hass = hass;
+      // The hub dropdown options depend on hass; rebuild the schema when the set
+      // of hub devices changes (not every tick, to avoid disrupting interaction).
+      const sig = this._hubDevices().map((o) => o.value).join(",");
+      if (sig !== this._devSig) {
+        this._devSig = sig;
+        this._form.schema = this._schema();
+      }
+    }
+    if (this._overrideForm) this._overrideForm.hass = hass;
+  }
+
+  // Top-level ESPHome devices (hubs) only — exclude zone sub-devices, which carry
+  // a `via_device_id` pointing at their hub. Returns [{value: id, label}] for a
+  // `select` selector. HA can't natively filter the device picker by our
+  // component or by device hierarchy, so we derive the list here.
+  _hubDevices() {
+    const hass = this._hass;
+    if (!hass || !hass.devices) return [];
+    const isEsphome = (d) =>
+      Array.isArray(d.identifiers) &&
+      d.identifiers.some((i) => Array.isArray(i) && i[0] === "esphome");
+    return Object.keys(hass.devices)
+      .map((id) => hass.devices[id])
+      .filter((d) => d && !d.via_device_id && isEsphome(d))
+      .map((d) => ({ value: d.id, label: d.name_by_user || d.name || d.id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }
 
   _schema() {
     return [
       { name: "title", selector: { text: {} } },
-      // Only the main ESPHome node (hub) should be selectable — NOT the per-zone
-      // sub-devices (which are now real ESPHome devices too). The hub is the only
-      // one carrying button entities (restart / safe_mode); zone sub-devices have
-      // none, so an entity filter on `button` excludes them.
+      // Only top-level ESPHome nodes (hubs) should be selectable — NOT the
+      // per-zone sub-devices (which are real ESPHome devices too). HA has no
+      // notion of an ESPHome *component* (everything is the `esphome`
+      // integration), and its device selector can't filter on the device
+      // hierarchy, so we build the list ourselves from the canonical signal:
+      // a sub-device has `via_device_id` set; a hub does not.
       {
         name: "device_id",
-        selector: { device: { integration: "esphome", entity: [{ domain: "button" }] } },
+        selector: { select: { mode: "dropdown", options: this._hubDevices() } },
       },
       {
         name: "temperature_unit",
