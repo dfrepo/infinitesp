@@ -227,11 +227,11 @@ infinitesp:
 climate:
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Zone 1 Climate"
+    name: "Climate"
     zone: 1
   # - platform: infinitesp
   #   infinitesp_id: infinitesp_hub
-  #   name: "Zone 2 Climate"
+  #   name: "Climate"
   #   zone: 2
 
 # ──────────────────────────────────────────────
@@ -250,12 +250,12 @@ climate:
 cover:
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Zone 1 Damper"
+    name: "Damper"
     zone: 1
     device_class: damper
   # - platform: infinitesp
   #   infinitesp_id: infinitesp_hub
-  #   name: "Zone 2 Damper"
+  #   name: "Damper"
   #   zone: 2
   #   device_class: damper
 
@@ -268,7 +268,7 @@ cover:
 # cover:
 #   - platform: infinitesp
 #     infinitesp_id: infinitesp_hub
-#     name: "Zone 1 Damper"
+#     name: "Damper"
 #     zone: 1
 #     device_class: damper
 #     on_change:
@@ -285,12 +285,12 @@ sensor:
   # Zone environment - add temperature + humidity for each active zone
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Zone 1 Temperature"
+    name: "Temperature"
     type: temperature
     zone: 1
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Zone 1 Humidity"
+    name: "Humidity"
     type: humidity
     zone: 1
 
@@ -367,7 +367,7 @@ sensor:
   # Generic template — one per additional zone:
   # - platform: infinitesp
   #   infinitesp_id: infinitesp_hub
-  #   name: "Zone 3 Damper Position"
+  #   name: "Damper Position"
   #   type: damper_position
   #   zone: 3
   #   icon: "mdi:valve"
@@ -557,7 +557,7 @@ binary_sensor:
   # state). NOTE: this is the schedule/away state, NOT a motion/presence sensor.
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Zone 1 Occupancy"
+    name: "Occupancy"
     type: occupancy
     zone: 1
   - platform: status
@@ -626,12 +626,12 @@ text_sensor:
   # Zone info - add zone_name for each active zone
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Zone 1 Name"
+    name: "Name"
     type: zone_name
     zone: 1
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Zone 1 Hold State"
+    name: "Hold State"
     type: hold_state
     zone: 1
 

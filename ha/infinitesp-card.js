@@ -140,11 +140,48 @@ const DEVICE_ENTITY_IDS = (hass, deviceId, prefix, domain) => {
   return [];
 };
 
-// Discover zones from Home Assistant. Every zone surfaces as a climate entity
-// (climate.<node>_<zone>_climate); the per-zone temp/humidity/damper sensors are
-// deduced from the same stem. Returns [{name, temp, humidity, damper}].
+// Discover zones from Home Assistant. Every zone is an HA SUB-DEVICE (created by
+// the firmware `zones:` map) carrying a climate.<zoneslug>_climate entity and the
+// per-zone temp/humidity/damper/setpoint/select entities. We enumerate the hub's
+// sub-devices; ZONE_ENTITY_IDS then resolves each metric by the zone slug.
+// Falls back to the legacy main-node layout (climate.<node>_<zone>_climate).
 const discoverZones = (hass, deviceId, prefix) => {
-  if (!hass) return [];
+  if (!hass || !hass.entities) return [];
+  // Resolve the hub device id: explicit, else from a main-node entity by prefix.
+  let hubId = deviceId;
+  if (!hubId && prefix) {
+    const anchor = Object.keys(hass.entities).find(
+      (id) => id.startsWith(`sensor.${prefix}_`) && hass.entities[id].device_id
+    );
+    if (anchor) hubId = hass.entities[anchor].device_id;
+  }
+  const climateOf = (did) =>
+    Object.keys(hass.entities).find(
+      (id) =>
+        hass.entities[id].device_id === did &&
+        id.startsWith("climate.") &&
+        id.endsWith("_climate")
+    );
+  // Sub-devices with a climate entity. Prefer those linked to our hub
+  // (via_device_id); if that yields none (or the hub is unknown), accept any.
+  const subs = hass.devices ? Object.keys(hass.devices) : [];
+  const withClimate = subs
+    .filter((did) => did !== hubId && climateOf(did))
+    .map((did) => ({ did, d: hass.devices[did] }));
+  let zones = withClimate
+    .filter(({ d }) => !hubId || (d && d.via_device_id === hubId))
+    .map(({ d }) => ({ name: ((d.name_by_user || d.name) || "").trim() }))
+    .filter((z) => z.name);
+  // If the via_device_id link isn't populated, fall back to any non-hub device
+  // that carries a climate.*_climate entity (almost certainly a zone sub-device).
+  if (!zones.length && withClimate.length) {
+    zones = withClimate
+      .map(({ d }) => ({ name: ((d.name_by_user || d.name) || "").trim() }))
+      .filter((z) => z.name);
+  }
+  if (zones.length) return zones;
+
+  // Legacy fallback: main-node climates (climate.<prefix>_<zone>_climate).
   const climates = DEVICE_ENTITY_IDS(hass, deviceId, prefix, "climate").filter((id) =>
     id.endsWith("_climate")
   );
@@ -197,45 +234,36 @@ const ZONE_ENTITY_IDS = (hass, zone, prefix) => {
       }) || ""
     );
   };
+  // Resolve a per-zone entity id for `domain`/`metric`. All per-zone entities now
+  // live on the zone HA sub-device, so the entity_id is the zone slug + object_id
+  // (e.g. sensor.floor_3_temperature, climate.floor_3_climate). Resolution order:
+  //   1. sub-device slug id (the current convention)
+  //   2. entity registry on the sub-device (handles legacy/renamed entity_ids)
+  //   3. legacy node-prefixed stem (entities still on the main node)
+  const mid = (domain, metric) => {
+    const bySlug = slug ? `${domain}.${slug}_${metric}` : "";
+    if (has(bySlug)) return bySlug;
+    const reg = regId(domain, metric);
+    if (reg) return reg;
+    const byStem = stem ? `${domain}.${stem}_${metric}` : "";
+    return has(byStem) ? byStem : bySlug || byStem;
+  };
+  // Damper: prefer the numeric _damper_position sensor (graphable), else the cover.
   let damper = zone.damper;
-  if (!damper && stem) {
-    const s = `sensor.${stem}_damper_position`;
-    const c = `cover.${stem}_damper`;
-    damper = has(c) && !has(s) ? c : s;
+  if (!damper) {
+    const s = mid("sensor", "damper_position");
+    const c = mid("cover", "damper");
+    damper = has(s) ? s : has(c) ? c : s || c;
   }
-  // Setpoint numbers live on the per-zone HA SUB-DEVICE, so their entity_id is
-  // prefixed by the zone/device slug alone (e.g. number.floor_3_heat_target),
-  // NOT the node-prefixed stem used by the main-node temp/humidity sensors.
-  // Prefer the sub-device slug id; fall back to the node-prefixed stem so this
-  // still resolves if the targets are placed on the main node instead.
-  const numId = (metric) => {
-    const bySlug = slug ? `number.${slug}_${metric}` : "";
-    if (has(bySlug)) return bySlug;
-    const reg = regId("number", metric);
-    if (reg) return reg;
-    const byStem = stem ? `number.${stem}_${metric}` : "";
-    return has(byStem) ? byStem : bySlug || byStem;
-  };
-  // Fan mode / profile are per-zone SELECT entities living on the zone sub-device
-  // (select.<zoneslug>_fan_mode / _profile). Prefer the slug id, then the registry
-  // (handles legacy entity_ids), then the node-prefixed stem.
-  const selId = (metric) => {
-    const bySlug = slug ? `select.${slug}_${metric}` : "";
-    if (has(bySlug)) return bySlug;
-    const reg = regId("select", metric);
-    if (reg) return reg;
-    const byStem = stem ? `select.${stem}_${metric}` : "";
-    return has(byStem) ? byStem : bySlug || byStem;
-  };
   return {
     name: zone.name,
-    temp: zone.temp || (stem ? `sensor.${stem}_temperature` : ""),
-    humidity: zone.humidity || (stem ? `sensor.${stem}_humidity` : ""),
+    temp: zone.temp || mid("sensor", "temperature"),
+    humidity: zone.humidity || mid("sensor", "humidity"),
     damper: damper || "",
-    heat_target: zone.heat_target || numId("heat_target"),
-    cool_target: zone.cool_target || numId("cool_target"),
-    fan_mode: zone.fan_mode || selId("fan_mode"),
-    profile: zone.profile || selId("profile"),
+    heat_target: zone.heat_target || mid("number", "heat_target"),
+    cool_target: zone.cool_target || mid("number", "cool_target"),
+    fan_mode: zone.fan_mode || mid("select", "fan_mode"),
+    profile: zone.profile || mid("select", "profile"),
   };
 };
 
