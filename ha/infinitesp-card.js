@@ -1877,29 +1877,66 @@ class InfinitespCardEditor extends HTMLElement {
     this._hass = hass;
     if (this._form) this._form.hass = hass;
     if (this._overrideForm) this._overrideForm.hass = hass;
+    this._refreshHubPicker();
+  }
+
+  // InfinitESP hubs for the picker. Rule: a device is a zone SUB-device iff it has
+  // a `via_device_id` ("Connected via"), so we drop those — no coupling to which
+  // entities a sub-device happens to have. ESPHome detection is by entity
+  // `platform` (how HA itself associates a device to an integration), with the
+  // device identifiers as a secondary signal.
+  _hubDevices() {
+    const hass = this._hass;
+    if (!hass || !hass.devices) return [];
+    const esphomeDevIds = new Set();
+    if (hass.entities) {
+      for (const eid of Object.keys(hass.entities)) {
+        const e = hass.entities[eid];
+        if (e && e.platform === "esphome" && e.device_id) esphomeDevIds.add(e.device_id);
+      }
+    }
+    const isEsphome = (d) =>
+      esphomeDevIds.has(d.id) ||
+      (Array.isArray(d.identifiers) &&
+        d.identifiers.some((i) => Array.isArray(i) && i[0] === "esphome"));
+    return Object.keys(hass.devices)
+      .map((id) => hass.devices[id])
+      .filter((d) => d && !d.via_device_id && isEsphome(d))
+      .map((d) => ({ value: d.id, label: d.name_by_user || d.name || d.id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  // (Re)populate the native hub <select> from the live device list. Rendered
+  // outside ha-form so its options always reflect the current registry.
+  _refreshHubPicker() {
+    const sel = this._hubSelect;
+    if (!sel) return;
+    const opts = this._hubDevices();
+    const cur = this._config.device_id || "";
+    const sig = cur + "|" + opts.map((o) => o.value).join(",");
+    if (sig === this._hubSig) return;
+    this._hubSig = sig;
+    const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    const placeholder = opts.length ? "Select a device…" : "No InfinitESP devices found";
+    sel.innerHTML =
+      `<option value="" ${cur ? "" : "selected"} disabled hidden>${placeholder}</option>` +
+      opts
+        .map(
+          (o) =>
+            `<option value="${esc(o.value)}"${o.value === cur ? " selected" : ""}>${esc(o.label)}</option>`
+        )
+        .join("");
+  }
+
+  _onHubChange(value) {
+    this._hubSig = null;
+    this._emit(Object.assign({}, this._config, { device_id: value || undefined }));
+    this._renderZones();
   }
 
   _schema() {
     return [
       { name: "title", selector: { text: {} } },
-      // Native device picker (matches the other fields' styling and self-loads
-      // devices). Two native filters do the work:
-      //   • integration: esphome  -> only ESPHome nodes.
-      //   • entity: button        -> only devices that OWN a button entity.
-      // A hub always exposes restart/safe_mode buttons; zone SUB-devices expose
-      // none, so this excludes them. (HA's device selector can't filter on the
-      // device hierarchy / via_device_id directly, and there's no "component"
-      // concept — every ESPHome node is the same `esphome` integration — so
-      // "owns a firmware button" is the practical native signal for "is a hub".)
-      {
-        name: "device_id",
-        selector: {
-          device: {
-            filter: [{ integration: "esphome" }],
-            entity: [{ domain: "button" }],
-          },
-        },
-      },
       {
         name: "temperature_unit",
         selector: {
@@ -1951,6 +1988,34 @@ class InfinitespCardEditor extends HTMLElement {
 
   _render() {
     if (!this._form) {
+      // Hub device picker — a native <select> we control, styled to sit with the
+      // ha-form fields. Lists InfinitESP hubs only; zone sub-devices (which carry
+      // a via_device_id) are dropped. Native element => always renders.
+      this._hubRow = document.createElement("div");
+      this._hubRow.className = "inf-hub-field";
+      this._hubRow.innerHTML =
+        `<style>
+          .inf-hub-field { margin: 4px 0 8px; }
+          .inf-hub-field .inf-hub-label { font-size: .75rem; color: var(--secondary-text-color); margin: 0 0 6px 4px; }
+          .inf-hub-field select {
+            width: 100%; box-sizing: border-box; height: 48px; padding: 0 34px 0 12px;
+            border-radius: 6px; border: 1px solid var(--divider-color);
+            background-color: var(--card-background-color, var(--ha-card-background, #fff));
+            color: var(--primary-text-color); font: inherit; font-size: 1rem; cursor: pointer;
+            appearance: none; -webkit-appearance: none; -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath fill='%23888' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 8px center;
+            transition: border-color .15s ease;
+          }
+          .inf-hub-field select:hover { border-color: var(--primary-text-color); }
+          .inf-hub-field select:focus { outline: none; border-color: var(--primary-color); border-width: 2px; padding-right: 33px; }
+        </style>
+        <div class="inf-hub-label">ESPHome device (InfinitESP hub)</div>`;
+      this._hubSelect = document.createElement("select");
+      this._hubSelect.addEventListener("change", (ev) => this._onHubChange(ev.target.value));
+      this._hubRow.appendChild(this._hubSelect);
+      this.appendChild(this._hubRow);
+
       // Main options.
       this._form = document.createElement("ha-form");
       this._form.computeLabel = (s) => EDITOR_LABELS[s.name] || s.name;
@@ -1985,9 +2050,9 @@ class InfinitespCardEditor extends HTMLElement {
     this._form.schema = this._schema();
     this._form.data = {
       title: this._config.title || "",
-      device_id: this._config.device_id || "",
       temperature_unit: this._config.temperature_unit || "F",
     };
+    this._refreshHubPicker();
     this._overrideForm.schema = this._overrideSchema();
     this._overrideForm.data = {
       outdoor_temp: e.outdoor_temp || "",
