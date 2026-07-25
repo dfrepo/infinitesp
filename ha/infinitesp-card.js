@@ -78,6 +78,7 @@ const FEATURES = {
   blower_rpm: { section: "idu", label: "Blower", icon: "mdi:fan", kind: "num", unit: "RPM", digits: 0 },
   blower_watts: { section: "idu", label: "Blower Power", icon: "mdi:lightning-bolt", kind: "num", unit: "W", digits: 0 },
   static_pressure: { section: "idu", label: "Static Pressure", icon: "mdi:gauge", kind: "static", unit: "in wc", digits: 2, accent: "blue" },
+  system_mode: { section: "idu", label: "System Mode", icon: "mdi:hvac", kind: "select" },
 };
 
 // Per-zone metrics for the Zoning section (order is user-configurable too).
@@ -87,14 +88,25 @@ const ZONE_METRICS = {
   damper: { label: "Damper Open", icon: "mdi:valve" },
   heat_target: { label: "Heat To", icon: "mdi:fire" },
   cool_target: { label: "Cool To", icon: "mdi:snowflake" },
+  fan_mode: { label: "Fan", icon: "mdi:fan", kind: "select" },
+  profile: { label: "Profile", icon: "mdi:calendar-clock", kind: "select" },
 };
 
 // Default feature order per section (used when `sections:` is not configured).
 const DEFAULT_SECTIONS = {
   odu: ["outdoor_temp", "coil_temp", "stage", "line_voltage"],
-  idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure"],
-  zoning: ["temp", "humidity", "damper", "heat_target", "cool_target"],
+  idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure", "system_mode"],
+  zoning: ["temp", "humidity", "damper", "heat_target", "cool_target", "fan_mode", "profile"],
 };
+
+// Friendlier labels for select option values, per control context (the option
+// value "auto" means "Heat/Cool" for system mode but plain "Auto" for a fan).
+// Fallback: Title-cased slug (so med->Med, low->Low, hold->Hold need no entry).
+const OPT_LABELS = {
+  system_mode: { auto: "Heat/Cool", emergency_heat: "Em. Heat" },
+  profile: { schedule: "Per Schedule" },
+};
+const OPT_LABEL = (v, ctx) => (OPT_LABELS[ctx] && OPT_LABELS[ctx][v]) || TITLE(v);
 
 // Valid feature keys for a section (odu/idu from FEATURES, zoning from metrics).
 const SECTION_KEYS = (section) =>
@@ -158,6 +170,33 @@ const ZONE_ENTITY_IDS = (hass, zone, prefix) => {
   const slug = SLUG(zone.name || "");
   const stem = prefix ? `${prefix}_${slug}` : slug;
   const has = (id) => id && hass && hass.states && hass.states[id];
+  // The zone's HA sub-device (created by the firmware `zones:` map). Found by
+  // matching its name to the zone name. This lets us resolve sub-device entities
+  // via the registry even when HA kept a LEGACY entity_id from an earlier name
+  // (e.g. a fan_mode that was once "Zone 1 Fan Mode" -> select.<node>_zone_1_fan_mode)
+  // instead of the current slug convention (select.<zoneslug>_fan_mode).
+  let subDevId = null;
+  if (hass && hass.devices && slug) {
+    for (const did of Object.keys(hass.devices)) {
+      const d = hass.devices[did];
+      if (SLUG((d && (d.name_by_user || d.name)) || "") === slug) {
+        subDevId = did;
+        break;
+      }
+    }
+  }
+  // Find a sub-device entity of `domain` whose object_id is (or ends with) metric.
+  const regId = (domain, metric) => {
+    if (!subDevId || !hass.entities) return "";
+    const pfx = domain + ".";
+    return (
+      Object.keys(hass.entities).find((id) => {
+        if (hass.entities[id].device_id !== subDevId || !id.startsWith(pfx)) return false;
+        const obj = id.slice(pfx.length);
+        return obj === metric || obj.endsWith("_" + metric);
+      }) || ""
+    );
+  };
   let damper = zone.damper;
   if (!damper && stem) {
     const s = `sensor.${stem}_damper_position`;
@@ -171,8 +210,22 @@ const ZONE_ENTITY_IDS = (hass, zone, prefix) => {
   // still resolves if the targets are placed on the main node instead.
   const numId = (metric) => {
     const bySlug = slug ? `number.${slug}_${metric}` : "";
+    if (has(bySlug)) return bySlug;
+    const reg = regId("number", metric);
+    if (reg) return reg;
     const byStem = stem ? `number.${stem}_${metric}` : "";
-    return has(bySlug) ? bySlug : has(byStem) ? byStem : bySlug || byStem;
+    return has(byStem) ? byStem : bySlug || byStem;
+  };
+  // Fan mode / profile are per-zone SELECT entities living on the zone sub-device
+  // (select.<zoneslug>_fan_mode / _profile). Prefer the slug id, then the registry
+  // (handles legacy entity_ids), then the node-prefixed stem.
+  const selId = (metric) => {
+    const bySlug = slug ? `select.${slug}_${metric}` : "";
+    if (has(bySlug)) return bySlug;
+    const reg = regId("select", metric);
+    if (reg) return reg;
+    const byStem = stem ? `select.${stem}_${metric}` : "";
+    return has(byStem) ? byStem : bySlug || byStem;
   };
   return {
     name: zone.name,
@@ -181,6 +234,8 @@ const ZONE_ENTITY_IDS = (hass, zone, prefix) => {
     damper: damper || "",
     heat_target: zone.heat_target || numId("heat_target"),
     cool_target: zone.cool_target || numId("cool_target"),
+    fan_mode: zone.fan_mode || selId("fan_mode"),
+    profile: zone.profile || selId("profile"),
   };
 };
 
@@ -364,6 +419,20 @@ class InfinitespCard extends HTMLElement {
           this._chart.label = g.getAttribute("data-graph-label") || "";
         }
         this._render();
+      }
+    });
+    // Delegated change handling for interactive select controls (fan/profile/system).
+    this.addEventListener("change", (ev) => {
+      const sel = ev.target.closest("select[data-select]");
+      if (!sel) return;
+      ev.stopPropagation();
+      const id = sel.getAttribute("data-select");
+      const option = sel.value;
+      if (id && option && this._hass) {
+        this._hass.callService("select", "select_option", {
+          entity_id: id,
+          option,
+        });
       }
     });
   }
@@ -1015,6 +1084,69 @@ class InfinitespCard extends HTMLElement {
       </span>`;
   }
 
+  // Options list for a select entity (from its `options` attribute). [] if absent.
+  _selectOptions(id) {
+    const s = this._stateObj(id);
+    const o = s && s.attributes && s.attributes.options;
+    return Array.isArray(o) ? o : [];
+  }
+
+  // Inner <select> control for a select entity. Reflects the current state and
+  // writes via select.select_option on change (wired by the delegated handler).
+  // `ctx` selects the option-label vocabulary (system_mode / fan_mode / profile).
+  _selectControl(id, ctx, accent) {
+    const cur = this._state(id);
+    const opts = this._selectOptions(id);
+    const options = opts
+      .map((o) => `<option value="${o}"${o === cur ? " selected" : ""}>${OPT_LABEL(o, ctx)}</option>`)
+      .join("");
+    return `<select class="inf-select${accent ? " " + accent : ""}" data-select="${id}">${options}</select>`;
+  }
+
+  // Editable per-zone select cell (fan mode / profile). Renders "—" when absent.
+  _selectCell(icon, id, label, ctx, accent) {
+    if (!id || !this._stateObj(id) || !this._selectOptions(id).length)
+      return `<span class="zone-metric zselect" title="${label}">
+        <ha-icon icon="${icon}"></ha-icon>
+        <span class="zm-body"><span class="zm-val">—</span><span class="zm-label">${label}</span></span>
+      </span>`;
+    return `<span class="zone-metric zselect" title="${label}">
+        <ha-icon icon="${icon}"></ha-icon>
+        <span class="zm-body">
+          ${this._selectControl(id, ctx, accent)}
+          <span class="zm-label">${label}</span>
+        </span>
+      </span>`;
+  }
+
+  // Air-handler select tile (system mode). Matches the .tile layout.
+  _selectTile(id, label, icon, ctx) {
+    if (!id || !this._stateObj(id) || !this._selectOptions(id).length)
+      return this._tile(icon, label, "—", "", null, null);
+    return `
+      <div class="tile tile-select">
+        <ha-icon icon="${icon}"></ha-icon>
+        <div class="tile-body">
+          ${this._selectControl(id, ctx)}
+          <div class="tile-label">${label}</div>
+        </div>
+      </div>`;
+  }
+
+  // Resolve a main-node select entity id (e.g. system_mode) by suffix: explicit
+  // override, then device_id registry, then the node-name prefix.
+  _selectFeatureId(suffix) {
+    const cfg = this._config;
+    const override = (this._config.entities || {})[suffix];
+    if (override) return override;
+    if (cfg.device_id && this._hass && this._hass.entities) {
+      const ids = DEVICE_ENTITY_IDS(this._hass, cfg.device_id, this._prefix, "select");
+      const f = ids.find((id) => id.slice(7) === suffix || id.slice(7).endsWith("_" + suffix));
+      if (f) return f;
+    }
+    return this._prefix ? `select.${this._prefix}_${suffix}` : "";
+  }
+
   // Damper percent from either a cover entity (current_position attribute) or a
   // plain numeric sensor. Returns null if unavailable.
   _damperPct(id) {
@@ -1075,6 +1207,9 @@ class InfinitespCard extends HTMLElement {
       cells.heat_target = this._setpointCell("mdi:fire", z.heat_target, "Heat To");
     if (has(z.cool_target))
       cells.cool_target = this._setpointCell("mdi:snowflake", z.cool_target, "Cool To");
+    // Interactive per-zone selects (fan mode, comfort profile / hold).
+    cells.fan_mode = this._selectCell("mdi:fan", z.fan_mode, "Fan", "fan_mode");
+    cells.profile = this._selectCell("mdi:calendar-clock", z.profile, "Profile", "profile");
     const metrics = this._sectionFeatures("zoning").map((k) => cells[k] || "").join("");
     return `<div class="zone">
       <div class="zone-head">${z.name || "Zone"}</div>
@@ -1259,6 +1394,8 @@ class InfinitespCard extends HTMLElement {
         return e[key]
           ? this._numTile(e[key], f.label, f.icon, f.unit, f.digits, f.accent)
           : this._tile(f.icon, f.label, this._staticPressure(), f.unit, f.accent);
+      case "select":
+        return this._selectTile(this._selectFeatureId(key), f.label, f.icon, key);
       default:
         return "";
     }
@@ -1508,6 +1645,26 @@ class InfinitespCard extends HTMLElement {
       .dmeter .dfill { position:absolute; left:0; top:0; bottom:0; background: var(--info-color, #039be5); }
       .dmeter .dtext { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:.78rem; font-weight:600; color: var(--primary-text-color); text-shadow:0 0 2px var(--card-background-color); }
 
+      /* Interactive select controls (fan mode / profile / system mode). */
+      .inf-select {
+        appearance:none; -webkit-appearance:none; -moz-appearance:none;
+        font:inherit; font-size:.98rem; font-weight:600; color: var(--primary-text-color);
+        background: var(--secondary-background-color);
+        border:1px solid var(--divider-color); border-radius:9px;
+        padding:5px 26px 5px 9px; cursor:pointer; width:100%; box-sizing:border-box;
+        line-height:1.2; max-width:100%;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24'%3E%3Cpath fill='%23888' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+        background-repeat:no-repeat; background-position:right 5px center;
+        transition: border-color .12s ease, background-color .12s ease;
+      }
+      .inf-select:hover { border-color: color-mix(in srgb, var(--primary-color) 55%, var(--divider-color)); }
+      .inf-select:focus { outline:none; border-color: var(--primary-color); }
+      .inf-select.heat { color:#e5484d; }
+      .inf-select.cool { color:#2f7de5; }
+      .zone-metric.zselect .zm-body { gap:5px; }
+      .tile.tile-select .tile-body { flex:1; min-width:0; }
+      .tile.tile-select .inf-select { margin-bottom:3px; }
+
       .faults { display:flex; flex-direction:column; gap:6px; max-height:340px; overflow-y:auto; padding-right:4px; scrollbar-width:thin; }
       .faults::-webkit-scrollbar { width:8px; }
       .faults::-webkit-scrollbar-thumb { background: var(--divider-color); border-radius:8px; }
@@ -1667,6 +1824,7 @@ const EDITOR_LABELS = {
   blower_rpm: "Blower (RPM) (override)",
   blower_watts: "Blower power (W) (override)",
   static_pressure: "Static pressure (override)",
+  system_mode: "System mode select (override)",
   odu_model: "Outdoor unit model (override)",
   furnace_model: "Furnace / air-handler model (override)",
   zoning_model: "Zoning board model (override)",

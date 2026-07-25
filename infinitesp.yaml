@@ -581,12 +581,14 @@ binary_sensor:
 select:
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "System Mode"
     type: system_mode
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    name: "Zone 1 Fan Mode"
     type: fan_mode
+    zone: 1
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    type: profile
     zone: 1
 
 # ──────────────────────────────────────────────
