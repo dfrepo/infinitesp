@@ -1881,7 +1881,14 @@ class InfinitespCardEditor extends HTMLElement {
   _schema() {
     return [
       { name: "title", selector: { text: {} } },
-      { name: "device_id", selector: { device: { integration: "esphome" } } },
+      // Only the main ESPHome node (hub) should be selectable — NOT the per-zone
+      // sub-devices (which are now real ESPHome devices too). The hub is the only
+      // one carrying button entities (restart / safe_mode); zone sub-devices have
+      // none, so an entity filter on `button` excludes them.
+      {
+        name: "device_id",
+        selector: { device: { integration: "esphome", entity: [{ domain: "button" }] } },
+      },
       {
         name: "temperature_unit",
         selector: {
