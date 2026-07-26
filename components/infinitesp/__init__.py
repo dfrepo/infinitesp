@@ -32,12 +32,34 @@ CONF_ZONE_CONTROLLER_ADDRESS = "zone_controller_address"
 CONF_TEMPERATURE_UNIT = "temperature_unit"
 CONF_ZONES = "zones"
 CONF_FAULT_HISTORY = "fault_history"
+CONF_AUTO_ZONE_ENTITIES = "auto_zone_entities"
 
 # The full set of fault-history text sensors auto-created when `fault_history:
 # true` is set on the hub. Register 0x4202 always holds exactly 10 entries; the
 # combined `fault_history` string plus fault_1..fault_10 mirror the explicit
 # per-entry sensors — but generated in code so no YAML boilerplate is needed.
 _FAULT_TYPES = [f"fault_{i}" for i in range(1, 11)] + ["fault_history"]
+
+# The standard per-zone entity set auto-created when `auto_zone_entities: true`.
+# (platform_name, type_or_None, extra_raw_config). Every zone gets this exact set;
+# each entity's per-zone register indexing is handled in firmware by set_zone(n).
+# The climate/cover/number entity C++ sources live in the base component dir (so
+# they compile + their headers are included even without a top-level section);
+# sensor/select/binary_sensor/text_sensor load via their global entities.
+_ZONE_ENTITY_SPEC = [
+    ("climate", None, {}),
+    ("cover", None, {"device_class": "damper"}),
+    ("sensor", "temperature", {}),
+    ("sensor", "humidity", {}),
+    ("sensor", "damper_position", {"icon": "mdi:valve", "entity_category": "diagnostic"}),
+    ("number", "heat_target", {}),
+    ("number", "cool_target", {}),
+    ("select", "fan_mode", {}),
+    ("select", "profile", {}),
+    ("binary_sensor", "occupancy", {}),
+    ("text_sensor", "hold_state", {}),
+    ("text_sensor", "zone_name", {}),
+]
 
 # Registry of declared zones per hub, populated during validation so entity
 # platforms can decide (in their own to_code) whether to auto-attach to a zone
@@ -207,6 +229,59 @@ def _register_fault_history(config):
     return config
 
 
+# Key under which synthesized per-zone entity configs are stashed in the hub
+# config. Not a user-facing option.
+_KEY_ZONE_ENTS = "_zone_entities_gen"
+
+
+def _zone_platforms():
+    """Lazy-import the zone entity platforms (their modules import from this
+    package, so a top-level import would be circular). Returns
+    {name: (CONFIG_SCHEMA, to_code, entity_class)}."""
+    from . import climate as _cl, cover as _co, sensor as _se
+    from . import number as _nu, select as _sl, binary_sensor as _bs, text_sensor as _ts
+    return {
+        "climate": (_cl.CONFIG_SCHEMA, _cl.to_code, _cl.InfinitESPClimate),
+        "cover": (_co.CONFIG_SCHEMA, _co.to_code, _co.InfinitESPCover),
+        "sensor": (_se.CONFIG_SCHEMA, _se.to_code, _se.InfinitESPSensor),
+        "number": (_nu.CONFIG_SCHEMA, _nu.to_code, _nu.InfinitESPNumber),
+        "select": (_sl.CONFIG_SCHEMA, _sl.to_code, _sl.InfinitESPSelect),
+        "binary_sensor": (_bs.CONFIG_SCHEMA, _bs.to_code, _bs.InfinitESPBinarySensor),
+        "text_sensor": (_ts.CONFIG_SCHEMA, _ts.to_code, _ts.InfinitESPTextSensor),
+    }
+
+
+def _register_zone_entities(config):
+    """When `auto_zone_entities: true`, create the full standard entity set for
+    every declared zone (see _ZONE_ENTITY_SPEC) — no per-zone YAML blocks needed.
+    Each entity config is validated through its platform's own CONFIG_SCHEMA here
+    (so name/object_id/ID/device_class and the zone sub-device attachment are
+    produced exactly as a hand-written entry would be); to_code codegens them.
+    Runs after _register_zones so the zone sub-device IDs are declared. Works for
+    all platforms because the climate/cover/number entity C++ classes live in the
+    always-compiled base component dir (their headers are auto-included)."""
+    if not config.get(CONF_AUTO_ZONE_ENTITIES) or CONF_ZONES not in config:
+        return config
+    hub_key = str(config[CONF_ID])
+    platforms = _zone_platforms()
+    generated = []  # (platform_name, validated_config)
+    for num in config[CONF_ZONES]:
+        for pname, etype, extra in _ZONE_ENTITY_SPEC:
+            schema, _tc, cls = platforms[pname]
+            tag = etype or pname  # object-id-ish suffix for the declared ID
+            raw = {
+                CONF_ID: core.ID(f"{hub_key}_zone{num}_{tag}", is_declaration=True, type=cls),
+                CONF_INFINITESP_ID: config[CONF_ID],
+                "zone": num,  # platforms' CONF_ZONE; drives set_zone() + sub-device attach
+            }
+            if etype is not None:
+                raw[CONF_TYPE] = etype
+            raw.update(extra)
+            generated.append((pname, schema(raw)))
+    config[_KEY_ZONE_ENTS] = generated
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -246,6 +321,11 @@ CONFIG_SCHEMA = cv.All(
             # Auto-create a "Fault History" sub-device with fault_1..10 +
             # fault_history text sensors (no YAML entries needed).
             cv.Optional(CONF_FAULT_HISTORY, default=False): cv.boolean,
+            # Auto-create the full standard entity set for every declared zone
+            # (climate, damper cover, temp/humidity/damper_position sensors,
+            # heat/cool_target numbers, fan_mode/profile selects, occupancy,
+            # hold_state/zone_name) — no per-zone YAML blocks needed.
+            cv.Optional(CONF_AUTO_ZONE_ENTITIES, default=False): cv.boolean,
         }
     ).extend(cv.COMPONENT_SCHEMA).extend(uart.UART_DEVICE_SCHEMA),
     _validate_addresses,
@@ -253,6 +333,7 @@ CONFIG_SCHEMA = cv.All(
     _validate_zc_config,
     _register_zones,
     _register_fault_history,
+    _register_zone_entities,
 )
 
 INFINITESP_DEVICE_SCHEMA = cv.Schema(
@@ -298,6 +379,15 @@ async def to_code(config):
         from .text_sensor import to_code as ts_to_code
         for ent_conf in config[_KEY_FAULT]["entities"]:
             await ts_to_code(ent_conf)
+
+    # Codegen the auto-generated per-zone entities (validated in
+    # _register_zone_entities) now that the zone sub-devices exist. The
+    # climate/cover/number classes live in the base component dir, so their
+    # sources/headers are always present — no platform section required.
+    if _KEY_ZONE_ENTS in config:
+        platforms = _zone_platforms()
+        for pname, ent_conf in config[_KEY_ZONE_ENTS]:
+            await platforms[pname][1](ent_conf)  # platform to_code
 
     if config[CONF_ZONE_CONTROLLER_ADDRESS] != 0:
         cg.add(var.set_zc_address(config[CONF_ZONE_CONTROLLER_ADDRESS]))

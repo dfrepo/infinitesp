@@ -201,6 +201,8 @@ infinitesp:
   # Auto-create a "Fault History" sub-device with fault_1..10 + fault_history
   # text sensors (no per-entry YAML needed).
   fault_history: true
+  # Auto-create the full standard entity set per zone (no per-zone YAML).
+  auto_zone_entities: true
   # flow_control_pin: GPIO13   # RS485 DE/RE control (needed for some transceivers)
   # status_light_id: rgb_led  # Status LED reference (see light: section below)
 
@@ -227,71 +229,8 @@ infinitesp:
 # up to 8 zones; most installations have 1–3.
 # ──────────────────────────────────────────────
 
-climate:
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    zone: 1
-  # - platform: infinitesp
-  #   infinitesp_id: infinitesp_hub
-  #   name: "Climate"
-  #   zone: 2
-
-# ──────────────────────────────────────────────
-# Damper covers (zone-controller emulation OR physical ZC)
-# ──────────────────────────────────────────────
-# Reports each zone's commanded damper position (0–100%) from the bus. Works
-# two ways: set zone_controller_address above to EMULATE a ZC (0x60), OR leave
-# it at 0 and InfinitESP will passively SNOOP the thermostat's damper writes to
-# a real physical zone controller already on the bus. Either way the cover and
-# the per-zone climate heating/cooling action reflect real damper state. With
-# no ZC of any kind these covers never publish (unknown).
-# Add one entry per active zone (1–8). Without an on_change trigger the cover
-# is read-only.
-# ──────────────────────────────────────────────
-
-cover:
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    zone: 1
-    device_class: damper
-  # - platform: infinitesp
-  #   infinitesp_id: infinitesp_hub
-  #   name: "Damper"
-  #   zone: 2
-  #   device_class: damper
-
-# Optional on_change: fires whenever the cover's reported position doesn't
-# match the commanded position (from the thermostat bus or from Home
-# Assistant), passing the new 0.0–1.0 position as `pos`.
-# The cover never writes the bus, so what the action does (log, drive relays,
-# toggle GPIO) is up to you. This example just logs it.
-#
-# cover:
-#   - platform: infinitesp
-#     infinitesp_id: infinitesp_hub
-#     name: "Damper"
-#     zone: 1
-#     device_class: damper
-#     on_change:
-#       then:
-#         - logger.log:
-#             format: "Damper: %.0f%%"
-#             args: [ 'pos * 100.0' ]
-
-# ──────────────────────────────────────────────
-# Sensors
-# ──────────────────────────────────────────────
-
 sensor:
   # Zone environment - add temperature + humidity for each active zone
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: temperature
-    zone: 1
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: humidity
-    zone: 1
 
   # Outdoor temperature
   - platform: infinitesp
@@ -522,10 +461,6 @@ binary_sensor:
     entity_category: diagnostic
   # Per-zone occupancy (occupied = not in the thermostat's away/unoccupied
   # state). NOTE: this is the schedule/away state, NOT a motion/presence sensor.
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: occupancy
-    zone: 1
   - platform: status
     name: "Status"
 
@@ -548,14 +483,6 @@ select:
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
     type: system_mode
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: fan_mode
-    zone: 1
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: profile
-    zone: 1
 
 # ──────────────────────────────────────────────
 # Numbers — per-zone heat/cool setpoints (read-write, graphable)
@@ -566,38 +493,8 @@ select:
 # dashboard/card can bind by type regardless of the display name. Add one
 # heat_target and one cool_target per active zone; each auto-groups under its
 # zone sub-device (see `zones:` on the hub).
-number:
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: heat_target
-    zone: 1
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: cool_target
-    zone: 1
-#  - platform: infinitesp
-#    infinitesp_id: infinitesp_hub
-#    type: heat_target
-#    zone: 2
-#  - platform: infinitesp
-#    infinitesp_id: infinitesp_hub
-#    type: cool_target
-#    zone: 2
-
-# ──────────────────────────────────────────────
-# Text sensors
-# ──────────────────────────────────────────────
-
 text_sensor:
   # Zone info - add zone_name for each active zone
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: zone_name
-    zone: 1
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: hold_state
-    zone: 1
 
   # Device models (from 0104 DeviceInfo). device_address selects the device:
   #   0x50 = outdoor unit, 0x40 = furnace/air-handler, 0x60 = zone controller.
