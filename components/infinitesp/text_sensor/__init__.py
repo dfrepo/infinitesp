@@ -18,7 +18,11 @@ InfinitESPTextSensor = infinitesp_ns.class_("InfinitESPTextSensor", text_sensor.
 
 # Per-zone text_sensor types auto-attach to their zone HA sub-device; global
 # types stay on the main node.
-TEXT_SENSOR_ZONED = {"zone_name", "hold_state", "comfort_profile"}
+# Per-zone text_sensor types auto-attach to their zone HA sub-device; global
+# types stay on the main node. NOTE: comfort_profile is intentionally NOT zoned —
+# its decode reads a single fixed register (0x400A, zone 1's comfort table), so
+# it's effectively a global/system diagnostic, not per-zone data.
+TEXT_SENSOR_ZONED = {"zone_name", "hold_state"}
 
 # type -> {key, [address]}. The dict KEY is the user-facing `type` (== object_id);
 # `key` is the internal firmware sensor-type (decode path), decoupled so a type

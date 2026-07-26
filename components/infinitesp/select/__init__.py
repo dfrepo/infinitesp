@@ -30,14 +30,20 @@ SELECT_TYPES = {
         "label": "Fan Mode",
         "options": ["auto", "low", "med", "high"],
     },
-    # Per-zone comfort activity / schedule. Selecting home/away/sleep/wake applies
-    # that comfort profile as a permanent hold; "hold" holds the CURRENT setpoints
-    # indefinitely (manual permanent hold); "schedule" cancels the hold and resumes
-    # the programmed schedule.
-    "profile": {
+    # Per-zone comfort ACTIVITY (which setpoint set). home/away/sleep/wake are
+    # writable (apply that comfort profile + hold); "manual" is read-only (the
+    # custom-setpoints state, entered by changing a setpoint). This is the
+    # thermostat's "activity" axis — orthogonal to hold_mode.
+    "activity": {
         "zoned": True,
-        "label": "Profile",
-        "options": ["home", "away", "sleep", "wake", "hold", "schedule"],
+        "label": "Activity",
+        "options": ["home", "away", "sleep", "wake", "manual"],
+    },
+    # Per-zone HOLD axis: follow the schedule, or hold the current setpoints.
+    "hold_mode": {
+        "zoned": True,
+        "label": "Hold Mode",
+        "options": ["schedule", "hold"],
     },
 }
 

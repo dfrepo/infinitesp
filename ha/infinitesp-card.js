@@ -89,14 +89,15 @@ const ZONE_METRICS = {
   heat_target: { label: "Heat To", icon: "mdi:fire" },
   cool_target: { label: "Cool To", icon: "mdi:snowflake" },
   fan_mode: { label: "Fan", icon: "mdi:fan", kind: "select" },
-  profile: { label: "Profile", icon: "mdi:calendar-clock", kind: "select" },
+  activity: { label: "Activity", icon: "mdi:home-thermometer", kind: "select" },
+  hold_mode: { label: "Hold", icon: "mdi:calendar-clock", kind: "select" },
 };
 
 // Default feature order per section (used when `sections:` is not configured).
 const DEFAULT_SECTIONS = {
   odu: ["outdoor_temp", "coil_temp", "stage", "line_voltage"],
   idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure", "system_mode"],
-  zoning: ["temp", "humidity", "damper", "heat_target", "cool_target", "fan_mode", "profile"],
+  zoning: ["temp", "humidity", "damper", "heat_target", "cool_target", "fan_mode", "activity", "hold_mode"],
 };
 
 // Friendlier labels for select option values, per control context (the option
@@ -104,7 +105,7 @@ const DEFAULT_SECTIONS = {
 // Fallback: Title-cased slug (so med->Med, low->Low, hold->Hold need no entry).
 const OPT_LABELS = {
   system_mode: { auto: "Heat/Cool", emergency_heat: "Em. Heat" },
-  profile: { schedule: "Per Schedule" },
+  hold_mode: { schedule: "Per Schedule" },
 };
 const OPT_LABEL = (v, ctx) => (OPT_LABELS[ctx] && OPT_LABELS[ctx][v]) || TITLE(v);
 
@@ -265,7 +266,8 @@ const ZONE_ENTITY_IDS = (hass, zone, prefix) => {
     heat_target: zone.heat_target || mid("number", "heat_target"),
     cool_target: zone.cool_target || mid("number", "cool_target"),
     fan_mode: zone.fan_mode || mid("select", "fan_mode"),
-    profile: zone.profile || mid("select", "profile"),
+    activity: zone.activity || mid("select", "activity"),
+    hold_mode: zone.hold_mode || mid("select", "hold_mode"),
   };
 };
 
@@ -1168,9 +1170,14 @@ class InfinitespCard extends HTMLElement {
 
   // Inner <select> control for a select entity. Reflects the current state and
   // writes via select.select_option on change (wired by the delegated handler).
-  // `ctx` selects the option-label vocabulary (system_mode / fan_mode / profile).
-  _selectControl(id, ctx, accent) {
+  // `ctx` selects the option-label vocabulary (system_mode / fan_mode / activity /
+  // hold_mode). When read-only, render the current value as static text instead of
+  // an interactive dropdown (see _isReadonly / config `readonly:`).
+  _selectControl(id, ctx, accent, readonly) {
     const cur = this._state(id);
+    if (readonly) {
+      return `<span class="inf-select ro${accent ? " " + accent : ""}">${OPT_LABEL(cur, ctx)}</span>`;
+    }
     const opts = this._selectOptions(id);
     const options = opts
       .map((o) => `<option value="${o}"${o === cur ? " selected" : ""}>${OPT_LABEL(o, ctx)}</option>`)
@@ -1178,7 +1185,14 @@ class InfinitespCard extends HTMLElement {
     return `<select class="inf-select${accent ? " " + accent : ""}" data-select="${id}">${options}</select>`;
   }
 
-  // Editable per-zone select cell (fan mode / profile). Renders "—" when absent.
+  // Is this metric configured read-only? `readonly:` in card config is a list of
+  // metric keys (e.g. ["hold_mode"]) rendered as display-only.
+  _isReadonly(metric) {
+    const ro = this._config && this._config.readonly;
+    return Array.isArray(ro) && ro.includes(metric);
+  }
+
+  // Editable (or read-only) per-zone select cell. Renders "—" when absent.
   _selectCell(icon, id, label, ctx, accent) {
     if (!id || !this._stateObj(id) || !this._selectOptions(id).length)
       return `<span class="zone-metric zselect" title="${label}">
@@ -1188,7 +1202,7 @@ class InfinitespCard extends HTMLElement {
     return `<span class="zone-metric zselect" title="${label}">
         <ha-icon icon="${icon}"></ha-icon>
         <span class="zm-body">
-          ${this._selectControl(id, ctx, accent)}
+          ${this._selectControl(id, ctx, accent, this._isReadonly(ctx))}
           <span class="zm-label">${label}</span>
         </span>
       </span>`;
@@ -1202,7 +1216,7 @@ class InfinitespCard extends HTMLElement {
       <div class="tile tile-select">
         <ha-icon icon="${icon}"></ha-icon>
         <div class="tile-body">
-          ${this._selectControl(id, ctx)}
+          ${this._selectControl(id, ctx, null, this._isReadonly(ctx))}
           <div class="tile-label">${label}</div>
         </div>
       </div>`;
@@ -1282,9 +1296,10 @@ class InfinitespCard extends HTMLElement {
       cells.heat_target = this._setpointCell("mdi:fire", z.heat_target, "Heat To");
     if (has(z.cool_target))
       cells.cool_target = this._setpointCell("mdi:snowflake", z.cool_target, "Cool To");
-    // Interactive per-zone selects (fan mode, comfort profile / hold).
+    // Interactive per-zone selects: fan, comfort activity, and hold mode.
     cells.fan_mode = this._selectCell("mdi:fan", z.fan_mode, "Fan", "fan_mode");
-    cells.profile = this._selectCell("mdi:calendar-clock", z.profile, "Profile", "profile");
+    cells.activity = this._selectCell("mdi:home-thermometer", z.activity, "Activity", "activity");
+    cells.hold_mode = this._selectCell("mdi:calendar-clock", z.hold_mode, "Hold", "hold_mode");
     const metrics = this._sectionFeatures("zoning").map((k) => cells[k] || "").join("");
     return `<div class="zone">
       <div class="zone-head">${z.name || "Zone"}</div>
@@ -1736,6 +1751,10 @@ class InfinitespCard extends HTMLElement {
       .inf-select:focus { outline:none; border-color: var(--primary-color); }
       .inf-select.heat { color:#e5484d; }
       .inf-select.cool { color:#2f7de5; }
+      /* Read-only select: show the value as plain text (no dropdown chrome). */
+      .inf-select.ro { border-color:transparent; background:transparent; cursor:default; padding-left:2px;
+        background-image:none; -webkit-appearance:none; appearance:none; }
+      .inf-select.ro:hover { border-color:transparent; }
       .zone-metric.zselect .zm-body { gap:5px; }
       .tile.tile-select .tile-body { flex:1; min-width:0; }
       .tile.tile-select .inf-select { margin-bottom:3px; }
