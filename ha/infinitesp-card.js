@@ -357,9 +357,7 @@ class InfinitespCard extends HTMLElement {
     this._prefix = prefix;
 
     if (!this._rawFaults.length) {
-      this._config.faults = Array.from({ length: 10 }, (_, i) =>
-        prefix ? `sensor.${prefix}_fault_${i + 1}` : `sensor.fault_${i + 1}`
-      );
+      this._config.faults = this._resolveFaultIds(cfg.device_id, prefix);
     }
 
     // Auto-discover zones when the user didn't configure any (needs hass).
@@ -370,6 +368,53 @@ class InfinitespCard extends HTMLElement {
         this._zonesResolved = true;
       }
     }
+  }
+
+  // Resolve the 10 fault entity_ids. Faults are ESPHome text sensors → HA `sensor`
+  // domain, object_ids fault_1..fault_10. They may live on the auto-generated
+  // "Fault History" SUB-device (sensor.fault_history_fault_N) or, legacy, on the
+  // main node (sensor.<node>_fault_N). Prefer the registry (any entity whose
+  // object_id is fault_N on the hub or one of its sub-devices), then fall back to
+  // the node-prefixed guess so both layouts resolve.
+  _resolveFaultIds(hubDeviceId, prefix) {
+    const hass = this._hass;
+    const ids = new Array(10).fill(null);
+    if (hass && hass.entities) {
+      // Devices in scope: the hub itself + its sub-devices (via_device_id), plus
+      // any device named "Fault History" (covers node-name-only configs).
+      const scope = new Set();
+      if (hass.devices) {
+        for (const did of Object.keys(hass.devices)) {
+          const d = hass.devices[did];
+          if (!d) continue;
+          const isHub = hubDeviceId && did === hubDeviceId;
+          const isSub = hubDeviceId && d.via_device_id === hubDeviceId;
+          const isFaultDev = SLUG(d.name_by_user || d.name || "") === "fault_history";
+          if (isHub || isSub || isFaultDev) scope.add(did);
+        }
+      }
+      for (const eid of Object.keys(hass.entities)) {
+        if (!eid.startsWith("sensor.")) continue;
+        const m = eid.match(/_fault_(\d+)$/);
+        if (!m) continue;
+        const n = parseInt(m[1], 10);
+        if (n < 1 || n > 10) continue;
+        // If we resolved a device scope, only accept entities within it; else
+        // (no device info) accept the node-prefixed ones.
+        const dev = hass.entities[eid].device_id;
+        if (scope.size) {
+          if (!scope.has(dev)) continue;
+        } else if (prefix && !eid.startsWith(`sensor.${prefix}_`)) {
+          continue;
+        }
+        ids[n - 1] = eid;
+      }
+    }
+    // Fill any gaps with the legacy node-prefixed guess.
+    for (let i = 0; i < 10; i++) {
+      if (!ids[i]) ids[i] = prefix ? `sensor.${prefix}_fault_${i + 1}` : `sensor.fault_${i + 1}`;
+    }
+    return ids;
   }
 
   set hass(hass) {

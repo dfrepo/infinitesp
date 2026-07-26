@@ -4,7 +4,7 @@ import logging
 from esphome import pins, core
 from esphome.components import uart
 from esphome.components import time as time_
-from esphome.const import CONF_ID
+from esphome.const import CONF_ID, CONF_TYPE, CONF_DEVICE_ID, CONF_ENTITY_CATEGORY, CONF_NAME, CONF_ICON
 from esphome.helpers import fnv1a_32bit_hash
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,6 +31,13 @@ CONF_TIME_ID = "time_id"
 CONF_ZONE_CONTROLLER_ADDRESS = "zone_controller_address"
 CONF_TEMPERATURE_UNIT = "temperature_unit"
 CONF_ZONES = "zones"
+CONF_FAULT_HISTORY = "fault_history"
+
+# The full set of fault-history text sensors auto-created when `fault_history:
+# true` is set on the hub. Register 0x4202 always holds exactly 10 entries; the
+# combined `fault_history` string plus fault_1..fault_10 mirror the explicit
+# per-entry sensors — but generated in code so no YAML boilerplate is needed.
+_FAULT_TYPES = [f"fault_{i}" for i in range(1, 11)] + ["fault_history"]
 
 # Registry of declared zones per hub, populated during validation so entity
 # platforms can decide (in their own to_code) whether to auto-attach to a zone
@@ -163,6 +170,43 @@ def _register_zones(config):
     return config
 
 
+# Key under which the synthesized fault-history sub-device + entity configs are
+# stashed in the hub config (so iter_ids walks the declared IDs and to_code can
+# codegen them). Not a user-facing option.
+_KEY_FAULT = "_fault_history_gen"
+
+
+def _register_fault_history(config):
+    """When `fault_history: true`, synthesize a "Fault History" HA sub-device and
+    the full set of fault text sensors (fault_1..10 + fault_history) attached to
+    it — no YAML entries required. Each entity config is validated through the
+    text_sensor platform's own CONFIG_SCHEMA here (validation phase) so names,
+    object_ids and IDs are generated exactly as a hand-written entry would be;
+    to_code then just codegens them. Mirrors how zones declare sub-device IDs."""
+    if not config.get(CONF_FAULT_HISTORY):
+        return config
+    # Lazy import: the text_sensor platform module imports from this package, so a
+    # top-level import here would be circular. By now this module is fully loaded.
+    from .text_sensor import CONFIG_SCHEMA as TS_SCHEMA, InfinitESPTextSensor
+
+    hub_key = str(config[CONF_ID])
+    dev_name = f"{hub_key}_fault_dev"
+    dev_decl = core.ID(dev_name, is_declaration=True, type=Device)
+    entities = []
+    for t in _FAULT_TYPES:
+        raw = {
+            CONF_ID: core.ID(f"{hub_key}_{t}", is_declaration=True, type=InfinitESPTextSensor),
+            CONF_INFINITESP_ID: config[CONF_ID],
+            CONF_TYPE: t,
+            CONF_DEVICE_ID: dev_name,  # reference -> the fault sub-device (resolved in to_code)
+            CONF_ENTITY_CATEGORY: "diagnostic",
+            CONF_ICON: "mdi:alert-circle-outline",
+        }
+        entities.append(TS_SCHEMA(raw))
+    config[_KEY_FAULT] = {"name": "Fault History", "dev_id": dev_decl, "entities": entities}
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -199,12 +243,16 @@ CONFIG_SCHEMA = cv.All(
             # Per-zone HA sub-devices: {zone_number: "Display Name"}. Entities
             # with a matching `zone:` auto-group under these in Home Assistant.
             cv.Optional(CONF_ZONES): cv.Schema({cv.int_range(min=1, max=8): cv.string}),
+            # Auto-create a "Fault History" sub-device with fault_1..10 +
+            # fault_history text sensors (no YAML entries needed).
+            cv.Optional(CONF_FAULT_HISTORY, default=False): cv.boolean,
         }
     ).extend(cv.COMPONENT_SCHEMA).extend(uart.UART_DEVICE_SCHEMA),
     _validate_addresses,
     _validate_status_led,
     _validate_zc_config,
     _register_zones,
+    _register_fault_history,
 )
 
 INFINITESP_DEVICE_SCHEMA = cv.Schema(
@@ -224,18 +272,32 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(var.set_sam_address(config[CONF_SAM_ADDRESS]))
 
-    # Per-zone HA sub-devices: `zones:` maps zone number -> (name, declared ID)
-    # after _register_zones. Each entity with a matching `zone:` auto-attaches
-    # to these via device_id (see _inject_device_id in the platforms).
+    # HA sub-devices: per-zone (`zones:`) and, if enabled, a "Fault History"
+    # device. Each has a declared ID (stored in config so iter_ids registered it);
+    # entities attach via device_id. ESPHOME_DEVICE_COUNT must cover them all.
+    sub_devices = []  # (declared_id, name)
     if CONF_ZONES in config:
-        zones = config[CONF_ZONES]
+        for num, z in config[CONF_ZONES].items():
+            sub_devices.append((z["id"], z["name"]))
+    if _KEY_FAULT in config:
+        fh = config[_KEY_FAULT]
+        sub_devices.append((fh["dev_id"], fh["name"]))
+
+    if sub_devices:
         cg.add_define("USE_DEVICES")
-        cg.add_define("ESPHOME_DEVICE_COUNT", len(zones))
-        for num, z in zones.items():
-            dev = cg.new_Pvariable(z["id"])
-            cg.add(dev.set_device_id(fnv1a_32bit_hash(z["id"].id)))
-            cg.add(dev.set_name(z["name"]))
+        cg.add_define("ESPHOME_DEVICE_COUNT", len(sub_devices))
+        for decl_id, name in sub_devices:
+            dev = cg.new_Pvariable(decl_id)
+            cg.add(dev.set_device_id(fnv1a_32bit_hash(decl_id.id)))
+            cg.add(dev.set_name(name))
             cg.add(cg.App.register_device(dev))
+
+    # Codegen the auto-generated fault text sensors (validated in
+    # _register_fault_history) now that their sub-device exists.
+    if _KEY_FAULT in config:
+        from .text_sensor import to_code as ts_to_code
+        for ent_conf in config[_KEY_FAULT]["entities"]:
+            await ts_to_code(ent_conf)
 
     if config[CONF_ZONE_CONTROLLER_ADDRESS] != 0:
         cg.add(var.set_zc_address(config[CONF_ZONE_CONTROLLER_ADDRESS]))
