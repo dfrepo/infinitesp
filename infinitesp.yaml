@@ -483,6 +483,13 @@ select:
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
     type: system_mode
+  # System-wide vacation. Reads active state from the thermostat's 0x0420
+  # broadcast; selecting "off" CANCELS vacation (3B04 push). Activating from HA
+  # is not yet supported (the card renders it read-only while inactive).
+  - platform: infinitesp
+    infinitesp_id: infinitesp_hub
+    type: vacation
+    icon: "mdi:bag-suitcase"
 
 # ──────────────────────────────────────────────
 # Numbers — per-zone heat/cool setpoints (read-write, graphable)

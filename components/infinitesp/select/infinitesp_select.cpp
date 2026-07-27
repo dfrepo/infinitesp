@@ -13,9 +13,15 @@ static const char *const FAN_MODES[] = {"auto", "low", "med", "high"};
 // setpoint, it has no preset to apply).
 static const char *const ACTIVITY_OPTS[] = {"home", "away", "sleep", "wake", "manual"};
 // Hold mode — the orthogonal axis: following the schedule, or holding.
-static const char *const HOLD_MODE_OPTS[] = {"schedule", "hold"};
+// "hold_until" is READBACK-ONLY (a finite/timed hold set on the physical
+// thermostat); the thermostat ignores timed-hold writes from the SAM
+// (verified 2026-06-30), so selecting it from HA cannot take effect.
+static const char *const HOLD_MODE_OPTS[] = {"schedule", "hold", "hold_until"};
 static const uint8_t HOLD_MODE_SCHEDULE = 0;
 static const uint8_t HOLD_MODE_HOLD = 1;
+static const uint8_t HOLD_MODE_HOLD_UNTIL = 2;
+// System-wide vacation: index 0=off, 1=on. Readback from 0x0420 bit 0x20.
+static const char *const VACATION_OPTS[] = {"off", "on"};
 
 void InfinitESPSelect::control(const std::string &value) {
   if (select_type_ == "system_mode") {
@@ -49,6 +55,13 @@ void InfinitESPSelect::control(const std::string &value) {
       }
     }
   } else if (select_type_ == "hold_mode") {
+    // "hold_until" is readback-only: the thermostat ignores timed-hold writes
+    // from the SAM, so treat a UI pick of it as a no-op — re-publish the actual
+    // current hold state instead of sending an ignored write.
+    if (value == HOLD_MODE_OPTS[HOLD_MODE_HOLD_UNTIL]) {
+      on_register_update(parent_->get_sam_address(), REG_SAM_ZONES);
+      return;
+    }
     for (uint8_t i = 0; i < 2; i++) {
       if (value == HOLD_MODE_OPTS[i]) {
         if (i == HOLD_MODE_SCHEDULE)
@@ -59,6 +72,15 @@ void InfinitESPSelect::control(const std::string &value) {
         break;
       }
     }
+  } else if (select_type_ == "vacation") {
+    // "off" CANCELS vacation via a 3B04 push (set_vacation_days(0)) — verified to
+    // cancel even a thermostat-initiated vacation. Activating ("on") from HA needs
+    // a duration and is a future TODO, so it's a no-op here. Re-read the real bus
+    // state instead of optimistically showing the picked value.
+    if (value == "off")
+      parent_->set_vacation_days(0);
+    on_register_update(ADDR_THERMOSTAT, REG_TSTAT_STATUS);
+    return;
   }
   publish_state(value);
 }
@@ -120,17 +142,30 @@ void InfinitESPSelect::on_register_update(uint8_t device_addr, uint16_t register
       publish_state(ACTIVITY_OPTS[target]);
     }
   } else if (select_type_ == "hold_mode" && register_key == REG_SAM_ZONES) {
-    // Raw hold axis: holding (any duration) vs following the schedule.
+    // Raw hold axis: schedule (no hold) / hold (permanent) / hold_until (timed).
     auto *data = parent_->get_register(parent_->get_sam_address(), REG_SAM_ZONES);
     if (!data || data->size() < REG3B03_HOLD_DURATIONS + zone_ * 2)
       return;
     uint8_t idx = zone_ - 1;
     if (!(data->at(REG3B03_ACTIVE_ZONES) & (1 << idx)))
       return;
-    uint8_t target = parent_->get_zone_hold_duration(zone_) > 0 ? HOLD_MODE_HOLD : HOLD_MODE_SCHEDULE;
+    uint16_t dur = parent_->get_zone_hold_duration(zone_);
+    uint8_t target = dur == 0 ? HOLD_MODE_SCHEDULE
+                     : dur >= InfinitESPComponent::HOLD_PERMANENT ? HOLD_MODE_HOLD
+                                                                  : HOLD_MODE_HOLD_UNTIL;
     if (target != current_mode_) {
       current_mode_ = target;
       publish_state(HOLD_MODE_OPTS[target]);
+    }
+  } else if (select_type_ == "vacation" && register_key == REG_TSTAT_STATUS) {
+    // Vacation active flag from the thermostat's 0x0420 status broadcast (bit 0x20).
+    auto *data = parent_->get_register(ADDR_THERMOSTAT, REG_TSTAT_STATUS);
+    if (data && data->size() >= 3) {
+      uint8_t on = ((*data)[2] & REG0420_VACATION_BIT) ? 1 : 0;
+      if (on != current_mode_) {
+        current_mode_ = on;
+        publish_state(VACATION_OPTS[on]);
+      }
     }
   }
 }

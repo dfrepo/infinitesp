@@ -74,6 +74,16 @@ static const uint16_t REG_TSTAT_FAULTS = 0x4202;        // Fault history (10 ent
 static const uint16_t REG_TSTAT_WIFI_PROFILES = 0x460B; // WiFi profiles (4x 36 bytes)
 static const uint16_t REG_TSTAT_WIFI_SCAN = 0x460C;     // WiFi scan results (4x 36 bytes)
 
+// Thermostat system-status broadcast (0x20 -> 0xF1, table 0x04 row 0x20 = 0x0420,
+// 20 data bytes). REVERSE-ENGINEERED 2026-07-26 from a live capture (vacation
+// ON vs OFF, 50 samples, 100% consistent): data[2] bit 0x20 = Vacation mode
+// active. This is the ONLY bus-native vacation signal — 0x4012 is config-only
+// (min/max/fan, no active flag; confirmed here and in Infinitude's decode), and
+// the SAM's VACAT/VACDAYS live only on its RS-232 ASCII port, not the ABCD bus.
+// bit 0x20 tracks vacation independently of per-zone hold state.
+static const uint16_t REG_TSTAT_STATUS = 0x0420;
+static const uint8_t REG0420_VACATION_BIT = 0x20;  // data[2] bit
+
 // Comfort profile layout (register 400A, 35 bytes)
 // 5 activities × 7 bytes: [heat_sp(1), cool_sp(1), fan_mode(1), rclg_rhtg(1), hum_vent(1), unk5(1), unk6(1)]
 //   byte[3] = (rhtg << 4) | rclg — reheat heating/cooling dehumidify setpoint indices (nibbles)

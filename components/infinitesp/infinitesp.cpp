@@ -605,6 +605,18 @@ void InfinitESPComponent::handle_passive_frame_() {
       }
     }
 
+    // Thermostat system-status broadcast (0x20 -> 0xF1, reg 0x0420). data[2] bit
+    // 0x20 = Vacation mode active (verified on hardware 2026-07-26; see
+    // REG_TSTAT_STATUS). Stored under the thermostat address so the global
+    // `vacation` select can read it. This is the only bus-native vacation
+    // indicator (0x4012 is config-only).
+    if (reg_key == REG_TSTAT_STATUS && current_frame_.src == ADDR_THERMOSTAT &&
+        current_frame_.payload.size() > 3) {
+      std::vector<uint8_t> data(current_frame_.payload.begin() + 3, current_frame_.payload.end());
+      store_register_(ADDR_THERMOSTAT, reg_key, data);
+      notify_entities_(ADDR_THERMOSTAT, reg_key);
+    }
+
     // 0308 damper command from the thermostat to a physical ZC (0x60/0x61).
     // Emulated-ZC frames go to handle_write_request_ instead, so this only
     // fires for real hardware. 0308 is an 8-byte system-wide payload (see

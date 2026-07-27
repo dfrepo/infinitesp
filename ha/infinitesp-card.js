@@ -79,6 +79,7 @@ const FEATURES = {
   blower_watts: { section: "idu", label: "Blower Power", icon: "mdi:lightning-bolt", kind: "num", unit: "W", digits: 0 },
   static_pressure: { section: "idu", label: "Static Pressure", icon: "mdi:gauge", kind: "static", unit: "in wc", digits: 2, accent: "blue" },
   system_mode: { section: "idu", label: "System Mode", icon: "mdi:hvac", kind: "select" },
+  vacation: { section: "idu", label: "Vacation", icon: "mdi:bag-suitcase", kind: "vacation" },
 };
 
 // Per-zone metrics for the Zoning section (order is user-configurable too).
@@ -90,13 +91,13 @@ const ZONE_METRICS = {
   cool_target: { label: "Cool To", icon: "mdi:snowflake" },
   fan_mode: { label: "Fan", icon: "mdi:fan", kind: "select" },
   activity: { label: "Activity", icon: "mdi:home-thermometer", kind: "select" },
-  hold_mode: { label: "Hold", icon: "mdi:calendar-clock", kind: "select" },
+  hold_mode: { label: "Hold Mode", icon: "mdi:calendar-clock", kind: "select" },
 };
 
 // Default feature order per section (used when `sections:` is not configured).
 const DEFAULT_SECTIONS = {
   odu: ["outdoor_temp", "coil_temp", "stage", "line_voltage"],
-  idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure", "system_mode"],
+  idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure", "system_mode", "vacation"],
   zoning: ["temp", "humidity", "damper", "heat_target", "cool_target", "fan_mode", "activity", "hold_mode"],
 };
 
@@ -106,6 +107,7 @@ const DEFAULT_SECTIONS = {
 const OPT_LABELS = {
   system_mode: { auto: "Heat/Cool", emergency_heat: "Em. Heat" },
   hold_mode: { schedule: "Per Schedule" },
+  vacation: { on: "Vacation Mode", off: "Cancel" },
 };
 const OPT_LABEL = (v, ctx) => (OPT_LABELS[ctx] && OPT_LABELS[ctx][v]) || TITLE(v);
 
@@ -1175,12 +1177,21 @@ class InfinitespCard extends HTMLElement {
   // an interactive dropdown (see _isReadonly / config `readonly:`).
   _selectControl(id, ctx, accent, readonly) {
     const cur = this._state(id);
-    if (readonly) {
-      return `<span class="inf-select ro${accent ? " " + accent : ""}">${OPT_LABEL(cur, ctx)}</span>`;
+    // Vacation-aware Hold Mode. While system vacation is active the thermostat
+    // OWNS the hold state and rejects SAM hold writes (verified on the bus: a
+    // cancel/resume is re-asserted within ~3s; timed-hold writes are ignored).
+    // So render Hold Mode READ-ONLY during vacation, showing the real state:
+    // "Vacation Schedule" (green, semi-permanent) when following the schedule, or
+    // "Hold Until" when a per-zone override suspends vacation.
+    const holdVac = ctx === "hold_mode" && this._vacationActive();
+    const optLabel = (o) => (holdVac && o === "schedule" ? "On Schedule" : OPT_LABEL(o, ctx));
+    const green = holdVac && cur === "schedule" ? " vac-green" : "";
+    if (readonly || holdVac) {
+      return `<span class="inf-select ro${accent ? " " + accent : ""}${green}">${optLabel(cur)}</span>`;
     }
     const opts = this._selectOptions(id);
     const options = opts
-      .map((o) => `<option value="${o}"${o === cur ? " selected" : ""}>${OPT_LABEL(o, ctx)}</option>`)
+      .map((o) => `<option value="${o}"${o === cur ? " selected" : ""}>${optLabel(o)}</option>`)
       .join("");
     return `<select class="inf-select${accent ? " " + accent : ""}" data-select="${id}">${options}</select>`;
   }
@@ -1194,16 +1205,24 @@ class InfinitespCard extends HTMLElement {
 
   // Editable (or read-only) per-zone select cell. Renders "—" when absent.
   _selectCell(icon, id, label, ctx, accent) {
+    // While system vacation is active, tag the comfort controls (activity/hold)
+    // with a small green "Vacation" pill next to their label — the per-zone
+    // values still show the real reported state (see _zoneRow).
+    const vacTag =
+      (ctx === "activity" || ctx === "hold_mode") && this._vacationActive()
+        ? `<span class="zbadge badge-vacation">Vacation</span>`
+        : "";
+    const labelHtml = `<span class="zm-label">${label}${vacTag}</span>`;
     if (!id || !this._stateObj(id) || !this._selectOptions(id).length)
       return `<span class="zone-metric zselect" title="${label}">
         <ha-icon icon="${icon}"></ha-icon>
-        <span class="zm-body"><span class="zm-val">—</span><span class="zm-label">${label}</span></span>
+        <span class="zm-body"><span class="zm-val">—</span>${labelHtml}</span>
       </span>`;
     return `<span class="zone-metric zselect" title="${label}">
         <ha-icon icon="${icon}"></ha-icon>
         <span class="zm-body">
           ${this._selectControl(id, ctx, accent, this._isReadonly(ctx))}
-          <span class="zm-label">${label}</span>
+          ${labelHtml}
         </span>
       </span>`;
   }
@@ -1234,6 +1253,33 @@ class InfinitespCard extends HTMLElement {
       if (f) return f;
     }
     return this._prefix ? `select.${this._prefix}_${suffix}` : "";
+  }
+
+  // Resolve the global vacation select (on the hub) and return true when active.
+  // Firmware exposes it from the thermostat's 0x0420 status broadcast; state is
+  // "on"/"off". Used to tag zone comfort controls + gate hold_mode read-only.
+  _vacationActive() {
+    const s = this._stateObj(this._selectFeatureId("vacation"));
+    return !!s && s.state === "on";
+  }
+
+  // Air-handler Vacation tile. While active: a green tile with a select offering
+  // "Cancel" (writes "off" -> firmware set_vacation_days(0)). While inactive:
+  // read-only "Inactive" (activating from the card is a future TODO).
+  _vacationTile(f) {
+    const id = this._selectFeatureId("vacation");
+    if (!id || !this._stateObj(id))
+      return this._tile(f.icon, f.label, "—", "", "gray", null);
+    if (!this._vacationActive())
+      return this._tile(f.icon, f.label, "Inactive", "", "gray", null);
+    return `
+      <div class="tile tile-select vac-active">
+        <ha-icon icon="${f.icon}"></ha-icon>
+        <div class="tile-body">
+          ${this._selectControl(id, "vacation", null, false)}
+          <div class="tile-label">${f.label}</div>
+        </div>
+      </div>`;
   }
 
   // Damper percent from either a cover entity (current_position attribute) or a
@@ -1299,7 +1345,12 @@ class InfinitespCard extends HTMLElement {
     // Interactive per-zone selects: fan, comfort activity, and hold mode.
     cells.fan_mode = this._selectCell("mdi:fan", z.fan_mode, "Fan", "fan_mode");
     cells.activity = this._selectCell("mdi:home-thermometer", z.activity, "Activity", "activity");
-    cells.hold_mode = this._selectCell("mdi:calendar-clock", z.hold_mode, "Hold", "hold_mode");
+    cells.hold_mode = this._selectCell("mdi:calendar-clock", z.hold_mode, "Hold Mode", "hold_mode");
+    // NOTE: vacation is a system-wide override surfaced by the global "Vacation"
+    // tile (Air Handler). Per zone we intentionally show the RAW reported state:
+    // with no per-zone override, vacation reads activity=manual / hold=Schedule;
+    // a per-zone Hold/Hold-Until that suspends vacation reads as itself. This
+    // mirrors the bus and avoids masking the real per-zone controls.
     const metrics = this._sectionFeatures("zoning").map((k) => cells[k] || "").join("");
     return `<div class="zone">
       <div class="zone-head">${z.name || "Zone"}</div>
@@ -1365,12 +1416,12 @@ class InfinitespCard extends HTMLElement {
     return this._tile(icon, label, c.toFixed(1), nativeUnit || "°", null, g);
   }
 
-  _tile(icon, label, value, unit, accent, graph) {
+  _tile(icon, label, value, unit, accent, graph, extraCls) {
     const g = graph && graph.id;
     const open = g && this._chart && this._chart.entity === graph.id;
     const gLabel = (graph && (graph.label || label) ? graph.label || label : "").replace(/"/g, "&quot;");
     const attrs = g ? ` data-graph="${graph.id}" data-graph-label="${gLabel}"` : "";
-    const cls = `tile${accent ? " accent-" + accent : ""}${g ? " clickable" : ""}${open ? " open" : ""}`;
+    const cls = `tile${accent ? " accent-" + accent : ""}${extraCls ? " " + extraCls : ""}${g ? " clickable" : ""}${open ? " open" : ""}`;
     const gic = g ? `<ha-icon class="g-ic" icon="mdi:chart-line"></ha-icon>` : "";
     return `
       <div class="${cls}"${attrs}>
@@ -1486,6 +1537,8 @@ class InfinitespCard extends HTMLElement {
           : this._tile(f.icon, f.label, this._staticPressure(), f.unit, f.accent);
       case "select":
         return this._selectTile(this._selectFeatureId(key), f.label, f.icon, key);
+      case "vacation":
+        return this._vacationTile(f);
       default:
         return "";
     }
@@ -1656,10 +1709,10 @@ class InfinitespCard extends HTMLElement {
         ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:fan"></ha-icon> Air Handler ${this._modelChip(e.furnace_model)}</span>`, "", indoor, indoorExtra)}
         ${zoningSection}
 
-        <div class="section">
+        ${this._config.fault_history === false ? "" : `<div class="section">
           <div class="section-label"><span><ha-icon class="sec-ic" icon="mdi:alert-outline"></ha-icon> Fault History</span>${faultBadges}</div>
           <div class="faults">${faultRows}</div>
-        </div>
+        </div>`}
       </ha-card>`;
 
     if (this._chart.entity) this._renderChart();
@@ -1690,6 +1743,10 @@ class InfinitespCard extends HTMLElement {
       .badge { display:inline-flex; align-items:center; justify-content:center; height:20px; box-sizing:border-box; line-height:1; font-size:.7rem; padding:0 9px; border-radius:10px; font-weight:600; white-space:nowrap; }
       .badge.badge-fault { background: var(--error-color, #db4437); color:#fff; }
       .badge.badge-notice { background: var(--warning-color, #ffa600); color:#222; }
+      /* Small inline "Vacation" pill next to zone comfort labels (right-aligned). */
+      .zselect .zm-label { display:flex; align-items:center; }
+      .zbadge { display:inline-flex; align-items:center; height:14px; margin-left:auto; padding:0 6px; border-radius:8px; font-size:.58rem; font-weight:800; letter-spacing:.2px; white-space:nowrap; vertical-align:middle; }
+      .zbadge.badge-vacation { background: color-mix(in srgb, #1fa97e 20%, transparent); color:#1fa97e; }
 
       .metrics { display:grid; gap:10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
       .tile { display:flex; align-items:center; gap:10px; background: var(--card-background-color); border-radius:12px; padding:10px 12px; box-shadow: var(--ha-card-box-shadow, none); }
@@ -1703,6 +1760,11 @@ class InfinitespCard extends HTMLElement {
       .tile.accent-green ha-icon { color: var(--success-color, #43a047); }
       .tile.accent-gray ha-icon { color: var(--disabled-text-color, #9e9e9e); }
       .tile.accent-blue ha-icon { color: var(--info-color, #039be5); }
+      /* Cool-green vacation highlight (emerald/teal, theme-friendly). */
+      .tile.vac-active { background: color-mix(in srgb, #1fa97e 15%, var(--card-background-color)); box-shadow: inset 0 0 0 1px color-mix(in srgb, #1fa97e 34%, transparent); }
+      .tile.vac-active ha-icon { color: #1fa97e; }
+      .tile.vac-active .tile-value { color: #1fa97e; font-size:1.05rem; }
+      .tile.vac-active .inf-select { color:#1fa97e; font-weight:600; }
       .tile-value { font-size:1.35rem; font-weight:600; line-height:1.1; white-space:nowrap; }
       .tile-value .unit { font-size:.72rem; font-weight:400; color: var(--secondary-text-color); margin-left:3px; }
       .tile-label { font-size:.72rem; color: var(--secondary-text-color); white-space:nowrap; }
@@ -1751,6 +1813,7 @@ class InfinitespCard extends HTMLElement {
       .inf-select:focus { outline:none; border-color: var(--primary-color); }
       .inf-select.heat { color:#e5484d; }
       .inf-select.cool { color:#2f7de5; }
+      .inf-select.vac-green { color:#1fa97e; font-weight:600; }
       /* Read-only select: show the value as plain text (no dropdown chrome). */
       .inf-select.ro { border-color:transparent; background:transparent; cursor:default; padding-left:2px;
         background-image:none; -webkit-appearance:none; appearance:none; }
@@ -1910,6 +1973,8 @@ const EDITOR_LABELS = {
   title: "Card title",
   device_id: "ESPHome device",
   temperature_unit: "Temperature unit",
+  readonly: "Read-only controls",
+  fault_history: "Show Fault History section",
   outdoor_temp: "Outdoor temperature (override)",
   coil_temp: "Coil temperature (override)",
   stage: "Compressor stage (override)",
@@ -1987,6 +2052,23 @@ class InfinitespCardEditor extends HTMLElement {
           },
         },
       },
+      // Which interactive selects to render read-only (display-only, no dropdown).
+      {
+        name: "readonly",
+        selector: {
+          select: {
+            multiple: true,
+            mode: "list",
+            options: [
+              { value: "activity", label: "Activity" },
+              { value: "hold_mode", label: "Hold Mode" },
+              { value: "fan_mode", label: "Fan" },
+              { value: "system_mode", label: "System Mode" },
+            ],
+          },
+        },
+      },
+      { name: "fault_history", selector: { boolean: {} } },
     ];
   }
 
@@ -2070,6 +2152,8 @@ class InfinitespCardEditor extends HTMLElement {
       title: this._config.title || "",
       device_id: this._config.device_id || "",
       temperature_unit: this._config.temperature_unit || "F",
+      readonly: Array.isArray(this._config.readonly) ? this._config.readonly : [],
+      fault_history: this._config.fault_history !== false,
     };
     this._updateHubWarning();
     this._overrideForm.schema = this._overrideSchema();
@@ -2391,6 +2475,8 @@ class InfinitespCardEditor extends HTMLElement {
       device_id: "device_id" in d ? d.device_id || undefined : this._config.device_id,
       device: "device" in d ? d.device || undefined : this._config.device,
       temperature_unit: "temperature_unit" in d ? d.temperature_unit : this._config.temperature_unit,
+      readonly: "readonly" in d ? (d.readonly && d.readonly.length ? d.readonly : undefined) : this._config.readonly,
+      fault_history: "fault_history" in d ? d.fault_history : this._config.fault_history,
       entities,
     });
     this._emit(cfg);

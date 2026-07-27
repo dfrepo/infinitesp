@@ -39,11 +39,23 @@ SELECT_TYPES = {
         "label": "Activity",
         "options": ["home", "away", "sleep", "wake", "manual"],
     },
-    # Per-zone HOLD axis: follow the schedule, or hold the current setpoints.
+    # Per-zone HOLD axis: follow the schedule, hold permanently, or (readback
+    # only) hold-until a time. "hold_until" is DISPLAY-ONLY: the thermostat
+    # ignores timed-hold writes from the SAM (verified 2026-06-30), so it can be
+    # reported when set on the physical thermostat but not set from HA.
     "hold_mode": {
         "zoned": True,
         "label": "Hold Mode",
-        "options": ["schedule", "hold"],
+        "options": ["schedule", "hold", "hold_until"],
+    },
+    # System-wide vacation. Readback from the thermostat's 0x0420 status broadcast
+    # (bit 0x20). "off" CANCELS vacation via a 3B04 push (verified to cancel even a
+    # thermostat-initiated vacation); "on" (activate from HA) is a future TODO, so
+    # the card renders this read-only while vacation is inactive.
+    "vacation": {
+        "zoned": False,
+        "label": "Vacation",
+        "options": ["off", "on"],
     },
 }
 
