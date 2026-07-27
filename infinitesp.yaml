@@ -15,15 +15,15 @@
 # UART pins.
 
 substitutions:
-  name: infinitesp
-  friendly_name: InfinitESP
+  name: infinitesp-dev
+  friendly_name: InfinitESP-dev
 
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   name_add_mac_suffix: false
   project:
-    name: infinitesp.esp32-s3-relay-6ch
+    name: infinitesp.esp32-s3-dev
     version: 0.1.0
 
 esp32:
@@ -38,6 +38,8 @@ esp32:
 
 logger:
   baud_rate: 0  # Free up UART0; logs available via WiFi/USB only
+#  level: VERBOSE
+  level: DEBUG
 
 api:
   # max_connections: 16  # Increase if using esphome logs frequently
@@ -45,18 +47,28 @@ api:
 ota:
   - platform: esphome
 
-wifi:
-  # InfinitESP can autodiscover WiFi credentials from the thermostat's bus
-  # register 0x4608 and cache them to NVS flash. If the ESP32 later boots
-  # without connectivity, it injects the cached creds after a 15-second
-  # grace period. No manual config needed.
-  # (Experimental, hardware UART only - TCP client has a circular dependency.)
-  networks:
-    - ssid: !secret ssid
-      password: !secret password
-  ap: {}  # Fallback captive portal if WiFi fails
+#wifi:
+#  # InfinitESP can autodiscover WiFi credentials from the thermostat's bus
+#  # register 0x4608 and cache them to NVS flash. If the ESP32 later boots
+#  # without connectivity, it injects the cached creds after a 15-second
+#  # grace period. No manual config needed.
+#  # (Experimental, hardware UART only - TCP client has a circular dependency.)
+#  networks:
+#    - ssid: !secret ssid
+#      password: !secret password
+#  ap: {}  # Fallback captive portal if WiFi fails
+#
+#captive_portal:
 
-captive_portal:
+ethernet:
+  type: W5500
+  clk_pin: GPIO13
+  mosi_pin: GPIO11
+  miso_pin: GPIO12
+  cs_pin: GPIO14
+  interrupt_pin: GPIO10
+  reset_pin: GPIO9
+
 
 time:
   - platform: homeassistant
@@ -82,16 +94,55 @@ external_components:
 # the one that matches your setup and comment out the others.
 # ──────────────────────────────────────────────
 
+
 # --- Option A: Hardware UART (simplest, recommended) ---
 uart:
-  id: bus_uart
-  tx_pin: GPIO17
-  rx_pin: GPIO18
-  baud_rate: 38400
-  data_bits: 8
-  parity: NONE
-  stop_bits: 1
-  rx_buffer_size: 4096
+  - id: bus_uart
+    tx_pin:
+      number: GPIO17
+    rx_pin:
+      number: GPIO16
+      mode: INPUT_PULLUP
+    flow_control_pin:
+      number: GPIO21
+    baud_rate: 38400
+    data_bits: 8
+    parity: NONE
+    stop_bits: 1
+    rx_buffer_size: 4096
+#    debug:
+#      direction: BOTH
+#      dummy_receiver: false
+#      debug_prefix: "[MYUART] "
+#      after:
+#        delimiter: "\n"
+#      sequence:
+#        - lambda: UARTDebug::log_string(direction, bytes, debug_prefix);
+
+
+#uart_rmtx:
+#  - id: bus_uart
+#    tx_pin: GPIO17      # RMT TX GPIO. NOT forwarded to the hardware UART.
+#    rx_pin: GPIO18      # hardware UART RX
+#    baud_rate: 38400
+#    data_bits: 8
+#    parity: NONE
+#    stop_bits: 1
+#    rx_buffer_size: 4096
+#    sub_bits: 6         # line code: 110/001, transition at 2/3
+#    rmt_mem_symbols: 64
+
+#uart_tcp_server:
+#  - id: ascii_uart
+#    port: 23
+#    max_clients: 4
+#    client_mode: fanout
+#    idle_timeout: 300s
+#
+#sam_ascii:
+#  id: sam_ascii_server
+#  infinitesp_id: infinitesp_hub
+#  uart_id: ascii_uart
 
 # --- Option B: USB CDC ACM (TinyUSB virtual serial) ---
 # For when the ESP32 connects to the bus indirectly via a USB-to-serial
@@ -190,21 +241,22 @@ sam_ascii:
 infinitesp:
   id: infinitesp_hub
   uart_id: bus_uart           # Change to bus_cdcuart or bus_tcpuart if using those
+  time_id: homeassistant_time  # Clock for fault-history dates
   sam_address: 0x92               # Nonzero = SAM emulation active. 0x92 = SAM, 0x93 = FakeSAM (test), 0 = passive
-  zone_controller_address: 0x60   # Nonzero = emulate ZC at 0x60. 0 = no emulation (still passively monitors a real ZC if present)
-  # Per-zone Home Assistant sub-devices. Each entity carrying a matching `zone:`
-  # is grouped under these devices in HA (no per-entity device_id needed). The
-  # names are yours; entities on a zone inherit the device name as their prefix.
+  zone_controller_address: 0   # Nonzero = emulate ZC at 0x60. 0 = no emulation (still passively monitors a real ZC if present)
   zones:
-    1: "Zone 1"
-    2: "Zone 2"
+    1: "Floor 3"
+    2: "Floor 1-2"
   # Auto-create a "Fault History" sub-device with fault_1..10 + fault_history
   # text sensors (no per-entry YAML needed).
   fault_history: true
-  # Auto-create the full standard entity set per zone (no per-zone YAML).
+  # Auto-create the full standard entity set per zone (climate, cover,
+  # temp/humidity/damper, setpoints, fan/profile, occupancy, hold/name).
   auto_zone_entities: true
   auto_global_entities: true
-  # flow_control_pin: GPIO13   # RS485 DE/RE control (needed for some transceivers)
+  # flow_control_pin: GPIO21   # RS485 DE/RE control (needed for some transceivers)
+#  flow_control_pin:
+#    number: GPIO21
   # status_light_id: rgb_led  # Status LED reference (see light: section below)
 
   # Feed external ESPHome sensors into the emulated ZC's register 0302. Zone
@@ -251,7 +303,6 @@ sensor:
   #   icon: "mdi:fan"
   #   entity_category: diagnostic
 
-
   # Static pressure (in. w.c.), computed in firmware from blower watts + airflow:
   #   SP = static_k * watts / cfm   (validated k=2.046 vs thermostat; override if needed)
 
@@ -269,7 +320,7 @@ sensor:
   # Generic template — one per additional zone:
   # - platform: infinitesp
   #   infinitesp_id: infinitesp_hub
-  #   name: "Damper Position"
+  #   name: "Zone 3 Damper Position"
   #   type: damper_position
   #   zone: 3
   #   icon: "mdi:valve"
@@ -284,16 +335,28 @@ sensor:
   # Vacation limits
 
   # WiFi
-  - platform: wifi_signal
-    name: "WiFi Signal"
-    update_interval: 60s
-    entity_category: diagnostic
+#  - platform: wifi_signal
+#    name: "WiFi Signal"
+#    update_interval: 60s
+#    entity_category: diagnostic
 
 # ──────────────────────────────────────────────
 # Binary sensors
 # ──────────────────────────────────────────────
 
 binary_sensor:
+#  - platform: gpio
+#    pin: 
+#      number: GPIO18
+#      mode: INPUT_PULLUP # Add or remove pullup based on your sensor
+#    name: "Monitored Pin State"
+#    id: monitored_pin
+#    internal: true
+#    on_state:
+#      then:
+#        - logger.log:
+#            format: "[PIN IS]  %s"
+#            args: 'x ? "Enabled" : "Disabled"'
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
     type: active_fault
@@ -319,36 +382,34 @@ binary_sensor:
 # Selects
 # ──────────────────────────────────────────────
 
-  # System-wide vacation. Reads active state from the thermostat's 0x0420
-  # broadcast; selecting "off" CANCELS vacation (3B04 push). Activating from HA
-  # is not yet supported (the card renders it read-only while inactive).
 
 # ──────────────────────────────────────────────
 # Numbers — per-zone heat/cool setpoints (read-write, graphable)
 # ──────────────────────────────────────────────
-# Editable setpoint entities that Home Assistant also records for history graphs
-# (unlike the climate entity's target_temperature_* attributes). `type` is the
-# contract: it selects the setpoint AND defaults the entity's object_id, so a
-# dashboard/card can bind by type regardless of the display name. Add one
-# heat_target and one cool_target per active zone; each auto-groups under its
-# zone sub-device (see `zones:` on the hub).
-text_sensor:
+# First-class numeric setpoint entities: editable (slider/box) AND recorded by
+# Home Assistant for clean history/statistics graphs — unlike the climate
+# entity's target_temperature_* which are attributes. Writes go to the bus via
+# the same path as the climate slider; the two stay in sync. Add one heat_target
+# and one cool_target per active zone.
   # Zone info - add zone_name for each active zone
 
   # Device models (from 0104 DeviceInfo). device_address selects the device:
   #   0x50 = outdoor unit, 0x40 = furnace/air-handler, 0x60 = zone controller.
 
-  # Fault history (polled every ~31s)
+  # Fault history: auto-generated. See `fault_history: true` on the hub above,
+  # which creates a "Fault History" sub-device with fault_1..10 + fault_history.
+
+  # Comfort profiles (home/away/sleep/wake setpoints + fan)
 
   # Thermostat network info
 
   # Dealer info
 
   # WiFi
-  - platform: wifi_info
-    ip_address:
-      name: "IP Address"
-      entity_category: diagnostic
+#  - platform: wifi_info
+#    ip_address:
+#      name: "IP Address"
+#      entity_category: diagnostic
 
 # ──────────────────────────────────────────────
 # Board hardware - OPTIONAL
