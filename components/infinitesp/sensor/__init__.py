@@ -71,7 +71,7 @@ SENSOR_TYPES = {
     # °F = uint16_BE / 16. zone N -> id N; id 0x14 = LAT, id 0x1C = HPT.
     # LAT/HPT exist only on zone boards with those thermistor ports wired, so
     # they default to disabled (enable in HA if your board reports them).
-    "zc_zone_temperature": {"key": "zc_zone_temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "zoned": True},
+    "zc_zone_temperature": {"key": "zc_zone_temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "zoned": True, "auto": False},
     "leaving_air_temperature": {"key": "zc_lat", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
     "hpt_temperature": {"key": "zc_hpt", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
     # ZC commanded damper position per zone (register 0308, 0-15 -> 0-100%).

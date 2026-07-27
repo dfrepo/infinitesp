@@ -33,6 +33,7 @@ CONF_TEMPERATURE_UNIT = "temperature_unit"
 CONF_ZONES = "zones"
 CONF_FAULT_HISTORY = "fault_history"
 CONF_AUTO_ZONE_ENTITIES = "auto_zone_entities"
+CONF_EXCLUDE_ZONE_ENTITIES = "exclude_zone_entities"
 
 # The full set of fault-history text sensors auto-created when `fault_history:
 # true` is set on the hub. Register 0x4202 always holds exactly 10 entries; the
@@ -40,27 +41,41 @@ CONF_AUTO_ZONE_ENTITIES = "auto_zone_entities"
 # per-entry sensors — but generated in code so no YAML boilerplate is needed.
 _FAULT_TYPES = [f"fault_{i}" for i in range(1, 11)] + ["fault_history"]
 
-# The standard per-zone entity set auto-created when `auto_zone_entities: true`.
-# (platform_name, type_or_None, extra_raw_config). Every zone gets this exact set;
-# each entity's per-zone register indexing is handled in firmware by set_zone(n).
-# The climate/cover/number entity C++ sources live in the base component dir (so
-# they compile + their headers are included even without a top-level section);
-# sensor/select/binary_sensor/text_sensor load via their global entities.
-_ZONE_ENTITY_SPEC = [
-    ("climate", None, {}),
-    ("cover", None, {"device_class": "damper"}),
-    ("sensor", "temperature", {}),
-    ("sensor", "humidity", {}),
-    ("sensor", "damper_position", {"icon": "mdi:valve", "entity_category": "diagnostic"}),
-    ("number", "heat_target", {}),
-    ("number", "cool_target", {}),
-    ("select", "fan_mode", {}),
-    ("select", "activity", {}),
-    ("select", "hold_mode", {}),
-    ("binary_sensor", "occupancy", {}),
-    ("text_sensor", "hold_state", {}),
-    ("text_sensor", "zone_name", {}),
-]
+# `auto_zone_entities: true` creates every per-zone entity type for every zone,
+# DERIVED from the platform type registries (types flagged "zoned": True) plus
+# climate/cover (inherently per-zone) — see _auto_zone_specs(). No hardcoded list,
+# so a new zoned type is auto-created automatically. Presentation-only extras that
+# aren't intrinsic to the type live here, keyed by the entity's tag (type name, or
+# the platform name for the typeless climate/cover). The climate/cover/number C++
+# sources live in the base component dir so they compile even without a top-level
+# section; sensor/select/binary_sensor/text_sensor load via their global entities.
+_ZONE_AUTO_EXTRAS = {
+    "cover": {"device_class": "damper"},
+    "damper_position": {"icon": "mdi:valve", "entity_category": "diagnostic"},
+}
+
+
+def _auto_zone_specs():
+    """(platform_name, type_or_None) for every per-zone entity auto-created by
+    `auto_zone_entities`: climate + cover, plus each platform type flagged
+    "zoned": True (skipping "auto": False types, which are per-zone but
+    hardware-specific/opt-in, e.g. zc_zone_temperature). Lazy-imports the platform
+    modules (circular at top level)."""
+    from . import sensor as _se, number as _nu, select as _sl
+    from . import binary_sensor as _bs, text_sensor as _ts
+    specs = [("climate", None), ("cover", None)]
+    for pname, types in (
+        ("sensor", _se.SENSOR_TYPES),
+        ("number", _nu.NUMBER_TYPES),
+        ("select", _sl.SELECT_TYPES),
+        ("binary_sensor", _bs.BINARY_SENSOR_TYPES),
+        ("text_sensor", _ts.TEXT_SENSOR_TYPES),
+    ):
+        for tname, info in types.items():
+            if info.get("zoned") and info.get("auto", True):
+                specs.append((pname, tname))
+    return specs
+
 
 # Registry of declared zones per hub, populated during validation so entity
 # platforms can decide (in their own to_code) whether to auto-attach to a zone
@@ -325,25 +340,37 @@ def _zone_platforms():
 
 
 def _register_zone_entities(config):
-    """When `auto_zone_entities: true`, create the full standard entity set for
-    every declared zone (see _ZONE_ENTITY_SPEC) — no per-zone YAML blocks needed.
-    Each entity config is validated through its platform's own CONFIG_SCHEMA here
-    (so name/object_id/ID/device_class and the zone sub-device attachment are
-    produced exactly as a hand-written entry would be); to_code codegens them.
-    Runs after _register_zones so the zone sub-device IDs are declared. Works for
-    all platforms because the climate/cover/number entity C++ classes live in the
-    always-compiled base component dir (their headers are auto-included)."""
+    """When `auto_zone_entities: true`, create every per-zone entity type (see
+    _auto_zone_specs — derived from the "zoned" type flags) for every declared
+    zone, minus any listed in `exclude_zone_entities`. No per-zone YAML blocks
+    needed. Each entity config is validated through its platform's own
+    CONFIG_SCHEMA here (so name/object_id/ID/device_class and the zone sub-device
+    attachment are produced exactly as a hand-written entry would be); to_code
+    codegens them. Runs after _register_zones so the zone sub-device IDs are
+    declared. Works for all platforms because the climate/cover/number entity C++
+    classes live in the always-compiled base component dir."""
     if not config.get(CONF_AUTO_ZONE_ENTITIES) or CONF_ZONES not in config:
         return config
+    specs = _auto_zone_specs()
+    valid_keys = {etype or pname for pname, etype in specs}
+    exclude = set(config.get(CONF_EXCLUDE_ZONE_ENTITIES, []))
+    unknown = exclude - valid_keys
+    if unknown:
+        raise cv.Invalid(
+            f"exclude_zone_entities has unknown entr{'y' if len(unknown) == 1 else 'ies'} "
+            f"{sorted(unknown)}; valid: {sorted(valid_keys)}"
+        )
     platforms = _zone_platforms()
     generated = []  # (platform_name, validated_config)
     for num in config[CONF_ZONES]:
-        for pname, etype, extra in _ZONE_ENTITY_SPEC:
+        for pname, etype in specs:
+            tag = etype or pname  # object-id suffix + exclude key
+            if tag in exclude:
+                continue
             schema, _tc, cls = platforms[pname]
-            base = dict(extra)
+            base = dict(_ZONE_AUTO_EXTRAS.get(tag, {}))
             if etype is not None:
                 base[CONF_TYPE] = etype
-            tag = etype or pname  # object-id-ish suffix for the declared ID
             raw = zone_entity_raw(config[CONF_ID], num, tag, cls, base)
             generated.append((pname, schema(raw)))
     config[_KEY_ZONE_ENTS] = generated
@@ -389,11 +416,15 @@ CONFIG_SCHEMA = cv.All(
             # Auto-create a "Fault History" sub-device with fault_1..10 +
             # fault_history text sensors (no YAML entries needed).
             cv.Optional(CONF_FAULT_HISTORY, default=False): cv.boolean,
-            # Auto-create the full standard entity set for every declared zone
-            # (climate, damper cover, temp/humidity/damper_position sensors,
-            # heat/cool_target numbers, fan_mode/profile selects, occupancy,
-            # hold_state/zone_name) — no per-zone YAML blocks needed.
+            # Auto-create every per-zone entity type for each declared zone,
+            # derived from the platforms' "zoned" type flags (climate, damper
+            # cover, temp/humidity/damper_position + zc_zone_temperature sensors,
+            # heat/cool_target numbers, fan_mode/activity/hold_mode selects,
+            # occupancy, hold_state/zone_name) — no per-zone YAML blocks needed.
             cv.Optional(CONF_AUTO_ZONE_ENTITIES, default=False): cv.boolean,
+            # Zone entity types to skip when auto_zone_entities is on. Values are
+            # type names (e.g. zc_zone_temperature) or "climate"/"cover".
+            cv.Optional(CONF_EXCLUDE_ZONE_ENTITIES, default=list): cv.ensure_list(cv.string),
         }
     ).extend(cv.COMPONENT_SCHEMA).extend(uart.UART_DEVICE_SCHEMA),
     _validate_addresses,
