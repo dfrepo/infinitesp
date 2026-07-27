@@ -111,6 +111,12 @@ const OPT_LABELS = {
 };
 const OPT_LABEL = (v, ctx) => (OPT_LABELS[ctx] && OPT_LABELS[ctx][v]) || TITLE(v);
 
+// Features that expose a per-feature "Read-only" toggle in the editor (their
+// on-card control is suppressed, leaving a display-only value).
+const READONLY_FEATURES = new Set([
+  "system_mode", "fan_mode", "activity", "hold_mode", "heat_target", "cool_target", "vacation",
+]);
+
 // Valid feature keys for a section (odu/idu from FEATURES, zoning from metrics).
 const SECTION_KEYS = (section) =>
   section === "zoning"
@@ -1140,7 +1146,7 @@ class InfinitespCard extends HTMLElement {
   // other metrics, with a light chart-icon hint on the right); the accent pencil
   // button next to the reading opens the custom slider dialog. Renders "—" when
   // the entity is absent.
-  _setpointCell(icon, id, label) {
+  _setpointCell(icon, id, label, metric) {
     if (!id || !this._stateObj(id))
       return `<span class="zone-metric zv" title="${label}">
         <ha-icon icon="${icon}"></ha-icon>
@@ -1148,6 +1154,7 @@ class InfinitespCard extends HTMLElement {
       </span>`;
     const gl = label.replace(/"/g, "&quot;");
     const kind = icon.includes("snowflake") ? "cool" : "heat";
+    const ro = metric && this._isReadonly(metric);
     return `<span class="zone-metric setpoint zv clickable" data-graph="${id}" data-graph-label="${gl}" title="${label}">
         <ha-icon icon="${icon}"></ha-icon>
         <span class="zm-body">
@@ -1155,9 +1162,13 @@ class InfinitespCard extends HTMLElement {
             <span class="zm-val">${this._tempStr(id)}</span>
             <span class="zm-label">${label}</span>
           </span>
-          <button class="sp-edit ${kind}" data-setpoint="${id}" data-setpoint-label="${gl}" data-setpoint-kind="${kind}" title="Adjust ${label}">
+          ${
+            ro
+              ? ""
+              : `<button class="sp-edit ${kind}" data-setpoint="${id}" data-setpoint-label="${gl}" data-setpoint-kind="${kind}" title="Adjust ${label}">
             <ha-icon icon="mdi:pencil"></ha-icon>
-          </button>
+          </button>`
+          }
         </span>
         <ha-icon class="g-ic" icon="mdi:chart-line"></ha-icon>
       </span>`;
@@ -1272,6 +1283,9 @@ class InfinitespCard extends HTMLElement {
       return this._tile(f.icon, f.label, "—", "", "gray", null);
     if (!this._vacationActive())
       return this._tile(f.icon, f.label, "Inactive", "", "gray", null);
+    // Read-only: green display-only tile (no Cancel control).
+    if (this._isReadonly("vacation"))
+      return this._tile(f.icon, f.label, "Vacation Mode", "", "green", null, "vac-active");
     return `
       <div class="tile tile-select vac-active">
         <ha-icon icon="${f.icon}"></ha-icon>
@@ -1339,9 +1353,9 @@ class InfinitespCard extends HTMLElement {
     // graphable by clicking the value. Only rendered when the entity exists.
     const has = (id) => id && this._hass && this._hass.states[id];
     if (has(z.heat_target))
-      cells.heat_target = this._setpointCell("mdi:fire", z.heat_target, "Heat To");
+      cells.heat_target = this._setpointCell("mdi:fire", z.heat_target, "Heat To", "heat_target");
     if (has(z.cool_target))
-      cells.cool_target = this._setpointCell("mdi:snowflake", z.cool_target, "Cool To");
+      cells.cool_target = this._setpointCell("mdi:snowflake", z.cool_target, "Cool To", "cool_target");
     // Interactive per-zone selects: fan, comfort activity, and hold mode.
     cells.fan_mode = this._selectCell("mdi:fan", z.fan_mode, "Fan", "fan_mode");
     cells.activity = this._selectCell("mdi:home-thermometer", z.activity, "Activity", "activity");
@@ -1973,7 +1987,6 @@ const EDITOR_LABELS = {
   title: "Card title",
   device_id: "ESPHome device",
   temperature_unit: "Temperature unit",
-  readonly: "Read-only controls",
   fault_history: "Show Fault History section",
   outdoor_temp: "Outdoor temperature (override)",
   coil_temp: "Coil temperature (override)",
@@ -2053,21 +2066,6 @@ class InfinitespCardEditor extends HTMLElement {
         },
       },
       // Which interactive selects to render read-only (display-only, no dropdown).
-      {
-        name: "readonly",
-        selector: {
-          select: {
-            multiple: true,
-            mode: "list",
-            options: [
-              { value: "activity", label: "Activity" },
-              { value: "hold_mode", label: "Hold Mode" },
-              { value: "fan_mode", label: "Fan" },
-              { value: "system_mode", label: "System Mode" },
-            ],
-          },
-        },
-      },
       { name: "fault_history", selector: { boolean: {} } },
     ];
   }
@@ -2152,7 +2150,6 @@ class InfinitespCardEditor extends HTMLElement {
       title: this._config.title || "",
       device_id: this._config.device_id || "",
       temperature_unit: this._config.temperature_unit || "F",
-      readonly: Array.isArray(this._config.readonly) ? this._config.readonly : [],
       fault_history: this._config.fault_history !== false,
     };
     this._updateHubWarning();
@@ -2174,21 +2171,50 @@ class InfinitespCardEditor extends HTMLElement {
     this._renderZones();
   }
 
+  // A feature is "editable" if it exposes per-feature options. Currently that's
+  // the features that support a Read-only toggle (see READONLY_FEATURES). Extend
+  // as more per-feature options are added.
+  _featEditable(section, key) {
+    return READONLY_FEATURES.has(key);
+  }
+
   _sectionEditorHtml(section, title) {
     const active = this._secList(section);
     const inactive = SECTION_KEYS(section).filter((k) => !active.includes(k));
     const rows = active
-      .map(
-        (k) => `
-        <div class="feat-row" data-key="${k}">
-          <ha-icon class="handle" icon="mdi:drag"></ha-icon>
-          <ha-icon class="f-ic" icon="${this._featIcon(section, k)}"></ha-icon>
-          <span class="f-label">${this._featLabel(section, k)}</span>
-          <ha-icon-button class="remove" data-section="${section}" data-key="${k}" title="Remove">
-            <ha-icon icon="mdi:close"></ha-icon>
-          </ha-icon-button>
-        </div>`
-      )
+      .map((k) => {
+        const editable = this._featEditable(section, k);
+        const open = editable && this._openFeat === section + ":" + k;
+        const ro = Array.isArray(this._config.readonly) && this._config.readonly.includes(k);
+        return `
+        <div class="feat-row${open ? " expanded" : ""}" data-key="${k}">
+          <div class="feat-row-head">
+            <ha-icon class="handle" icon="mdi:drag"></ha-icon>
+            <ha-icon class="f-ic" icon="${this._featIcon(section, k)}"></ha-icon>
+            <span class="f-label">${this._featLabel(section, k)}</span>
+            ${
+              editable
+                ? `<ha-icon-button class="edit${open ? " on" : ""}" data-section="${section}" data-key="${k}" title="Edit">
+                     <ha-icon icon="mdi:pencil"></ha-icon>
+                   </ha-icon-button>`
+                : ""
+            }
+            <ha-icon-button class="remove" data-section="${section}" data-key="${k}" title="Remove">
+              <ha-icon icon="mdi:close"></ha-icon>
+            </ha-icon-button>
+          </div>
+          ${
+            open
+              ? `<div class="feat-edit">
+                   <label class="feat-opt">
+                     <input type="checkbox" class="ro-toggle" data-key="${k}"${ro ? " checked" : ""} />
+                     Read-only
+                   </label>
+                 </div>`
+              : ""
+          }
+        </div>`;
+      })
       .join("");
     const addOptions = inactive
       .map((k) => `<option value="${k}">${this._featLabel(section, k)}</option>`)
@@ -2214,13 +2240,21 @@ class InfinitespCardEditor extends HTMLElement {
         .feat-section { margin-top: 14px; }
         .feat-title { font-weight: 600; font-size: .95rem; margin: 0 0 6px 2px; }
         .feat-list { display: flex; flex-direction: column; gap: 6px; }
-        .feat-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+        .feat-row { display: flex; flex-direction: column; padding: 0;
           border: 1px solid var(--divider-color); border-radius: 8px;
           background: var(--card-background-color); }
+        .feat-row-head { display: flex; align-items: center; gap: 8px; padding: 4px 6px; }
         .feat-row .handle { cursor: grab; color: var(--secondary-text-color); --mdc-icon-size: 20px; }
         .feat-row .f-ic { color: var(--primary-color); --mdc-icon-size: 20px; }
         .feat-row .f-label { flex: 1; }
-        .feat-row .remove { color: var(--secondary-text-color); --mdc-icon-size: 18px; margin-left: auto; }
+        .feat-row .edit { color: var(--secondary-text-color); --mdc-icon-size: 18px; margin-left: auto; }
+        .feat-row .edit.on { color: var(--primary-color); }
+        .feat-row .remove { color: var(--secondary-text-color); --mdc-icon-size: 18px; }
+        .feat-row .edit + .remove { margin-left: 0; }
+        .feat-row .remove:only-of-type { margin-left: auto; }
+        .feat-edit { padding: 4px 10px 8px 34px; border-top: 1px solid var(--divider-color); }
+        .feat-opt { display: flex; align-items: center; gap: 8px; font-size: .88rem; color: var(--primary-text-color); cursor: pointer; }
+        .feat-opt input { accent-color: var(--primary-color); }
         .feat-empty, .feat-add-empty { color: var(--secondary-text-color); font-size: .85rem; padding: 4px 2px; }
         .feat-add-row { margin-top: 6px; }
         .feat-add { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--divider-color);
@@ -2243,8 +2277,17 @@ class InfinitespCardEditor extends HTMLElement {
   _onSectionsClick(ev) {
     const rm = ev.target.closest && ev.target.closest(".remove");
     if (rm) {
-      this._setSection(rm.getAttribute("data-section"),
-        this._secList(rm.getAttribute("data-section")).filter((k) => k !== rm.getAttribute("data-key")));
+      const section = rm.getAttribute("data-section");
+      const key = rm.getAttribute("data-key");
+      if (this._openFeat === section + ":" + key) this._openFeat = null;
+      this._setSection(section, this._secList(section).filter((k) => k !== key));
+      return;
+    }
+    const ed = ev.target.closest && ev.target.closest(".edit");
+    if (ed) {
+      const tag = ed.getAttribute("data-section") + ":" + ed.getAttribute("data-key");
+      this._openFeat = this._openFeat === tag ? null : tag;
+      this._renderSections();
     }
   }
 
@@ -2253,6 +2296,18 @@ class InfinitespCardEditor extends HTMLElement {
     if (sel && sel.value) {
       const section = sel.getAttribute("data-section");
       this._setSection(section, this._secList(section).concat(sel.value));
+      return;
+    }
+    const ro = ev.target.closest && ev.target.closest(".ro-toggle");
+    if (ro) {
+      // Per-feature Read-only toggle -> maintain the config `readonly` key list.
+      const key = ro.getAttribute("data-key");
+      const set = new Set(Array.isArray(this._config.readonly) ? this._config.readonly : []);
+      if (ro.checked) set.add(key);
+      else set.delete(key);
+      const arr = [...set];
+      // Don't re-render (would drop the checkbox focus) — the panel stays open.
+      this._emit(Object.assign({}, this._config, { readonly: arr.length ? arr : undefined }));
     }
   }
 
@@ -2475,7 +2530,6 @@ class InfinitespCardEditor extends HTMLElement {
       device_id: "device_id" in d ? d.device_id || undefined : this._config.device_id,
       device: "device" in d ? d.device || undefined : this._config.device,
       temperature_unit: "temperature_unit" in d ? d.temperature_unit : this._config.temperature_unit,
-      readonly: "readonly" in d ? (d.readonly && d.readonly.length ? d.readonly : undefined) : this._config.readonly,
       fault_history: "fault_history" in d ? d.fault_history : this._config.fault_history,
       entities,
     });
