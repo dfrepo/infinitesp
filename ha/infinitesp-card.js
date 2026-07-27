@@ -1609,9 +1609,9 @@ class InfinitespCard extends HTMLElement {
             </div>
           </div>
           <div class="pv-secs">
-            ${odu}
-            ${idu}
             ${system}
+            ${idu}
+            ${odu}
             ${zoning}
             ${faults}
           </div>
@@ -1737,9 +1737,9 @@ class InfinitespCard extends HTMLElement {
           <span class="title">${this._config.title}</span>
         </div>
 
-        ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:heat-pump-outline"></ha-icon> Outdoor Unit ${this._modelChip(e.odu_model)}</span>`, "", outdoor, outdoorExtra)}
-        ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:fan"></ha-icon> Air Handler ${this._modelChip(e.furnace_model)}</span>`, "", indoor, indoorExtra)}
         ${systemSection}
+        ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:fan"></ha-icon> Air Handler ${this._modelChip(e.furnace_model)}</span>`, "", indoor, indoorExtra)}
+        ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:heat-pump-outline"></ha-icon> Outdoor Unit ${this._modelChip(e.odu_model)}</span>`, "", outdoor, outdoorExtra)}
         ${zoningSection}
 
         ${showFaults ? `<div class="section">
@@ -2276,9 +2276,9 @@ class InfinitespCardEditor extends HTMLElement {
           background: var(--card-background-color); color: var(--primary-text-color); }
         .sortable-ghost { opacity: .4; }
       </style>
-      ${this._sectionEditorHtml("odu", "Outdoor Unit features")}
-      ${this._sectionEditorHtml("idu", "Air Handler features")}
       ${this._sectionEditorHtml("system", "System features")}
+      ${this._sectionEditorHtml("idu", "Air Handler features")}
+      ${this._sectionEditorHtml("odu", "Outdoor Unit features")}
       ${this._sectionEditorHtml("zoning", "Zoning metrics")}`;
     // ha-sortable's item-moved event doesn't bubble reliably — bind per element.
     this._sectionsRoot.querySelectorAll("ha-sortable").forEach((el) => {
