@@ -17,16 +17,15 @@ InfinitESPBinarySensor = infinitesp_ns.class_("InfinitESPBinarySensor", binary_s
 
 # Per-zone binary_sensor types auto-attach to their zone HA sub-device; global
 # types (bus_status/electric_heat/compressor_running/active_fault) stay on main.
-BINARY_SENSOR_ZONED = {"occupancy"}
-
-# value = {"bus_class": <device-class nibble>, "device_class": optional HA default}
+# value = {"bus_class": <device-class nibble>, "device_class": optional HA default,
+#          "zoned": True for per-zone types (auto-attach to the zone sub-device)}
 BINARY_SENSOR_TYPES = {
     "bus_status": {"bus_class": 0},          # not register-based
     "electric_heat": {"bus_class": 4},       # IDU register
     "compressor_running": {"bus_class": 5},  # ODU register
     # Per-zone: SAM 3B02 offset-21 zones_unoccupied flag (occupied = bit clear).
     # NOTE this is the thermostat's occupied/away schedule state, not motion.
-    "occupancy": {"bus_class": 0, "device_class": "occupancy"},
+    "occupancy": {"bus_class": 0, "device_class": "occupancy", "zoned": True},
     # System-wide: ON when any thermostat fault-history (0x4202) entry is active.
     "active_fault": {"bus_class": 0, "device_class": "problem"},
 }
@@ -42,7 +41,7 @@ def _default_name(config):
 def _inject_device_id(config):
     """Pre-schema: attach per-zone binary sensors (occupancy) to their zone HA
     sub-device before the base schema's duplicate-name validator runs."""
-    if config.get(CONF_TYPE) in BINARY_SENSOR_ZONED and CONF_ZONE in config:
+    if BINARY_SENSOR_TYPES.get(config.get(CONF_TYPE), {}).get("zoned") and CONF_ZONE in config:
         dev_id = zone_device_id(config.get(CONF_INFINITESP_ID), config[CONF_ZONE])
         if dev_id is not None:
             config[CONF_DEVICE_ID] = dev_id
@@ -64,7 +63,7 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     info = BINARY_SENSOR_TYPES[config[CONF_TYPE]]
-    if config[CONF_TYPE] in BINARY_SENSOR_ZONED:
+    if info.get("zoned"):
         dev_id = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
         if dev_id is not None:
             config[CONF_DEVICE_ID] = dev_id

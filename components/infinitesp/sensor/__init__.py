@@ -14,16 +14,15 @@ from .. import (
 CONF_ZONE = "zone"
 CONF_STATIC_K = "static_k"
 
-# Per-zone sensor types auto-attach to their zone HA sub-device (like number/
-# select). Everything else (ODU/IDU/global) stays on the main node.
-SENSOR_ZONED = {"temperature", "humidity", "damper_position", "zc_zone_temperature"}
+# Per-zone sensor types (marked `"zoned": True`) auto-attach to their zone HA
+# sub-device (like number/select). Everything else (ODU/IDU/global) stays on main.
 
 InfinitESPSensor = infinitesp_ns.class_("InfinitESPSensor", sensor.Sensor, InfinitESPEntity)
 
 SENSOR_TYPES = {
     # SAM/thermostat sensors — device_class 0 (any), they gate on register_key
-    "temperature": {"key": "temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 0},
-    "humidity": {"key": "humidity", "unit": "%", "bus_class": 0},
+    "temperature": {"key": "temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 0, "zoned": True},
+    "humidity": {"key": "humidity", "unit": "%", "bus_class": 0, "zoned": True},
     "outdoor_temperature": {"key": "outdoor_temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 0},
     "vacation_min_temp": {"key": "vacation_min_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 0},
     "vacation_max_temp": {"key": "vacation_max_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 0},
@@ -69,13 +68,13 @@ SENSOR_TYPES = {
     # °F = uint16_BE / 16. zone N -> id N; id 0x14 = LAT, id 0x1C = HPT.
     # LAT/HPT exist only on zone boards with those thermistor ports wired, so
     # they default to disabled (enable in HA if your board reports them).
-    "zc_zone_temperature": {"key": "zc_zone_temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6},
+    "zc_zone_temperature": {"key": "zc_zone_temperature", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "zoned": True},
     "leaving_air_temperature": {"key": "zc_lat", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
     "hpt_temperature": {"key": "zc_hpt", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 6, "disabled_by_default": True},
     # ZC commanded damper position per zone (register 0308, 0-15 -> 0-100%).
     # Graphable numeric complement to the damper cover; reads 0308 (populated on
     # both primary and secondary controllers) rather than the 0319 feedback.
-    "damper_position": {"key": "damper_position", "unit": "%", "bus_class": 6},
+    "damper_position": {"key": "damper_position", "unit": "%", "bus_class": 6, "zoned": True},
     # IDU cycle counters (register 0310, 4-byte key-value entries) — device class 4
     "idu_low_heat_cycles": {"key": "idu_low_heat_cycles", "unit": "cycles", "bus_class": 4},
     "idu_high_heat_cycles": {"key": "idu_high_heat_cycles", "unit": "cycles", "bus_class": 4},
@@ -113,7 +112,7 @@ def _inject_device_id(config):
     """Pre-schema: attach per-zone sensors to their zone HA sub-device (before the
     base schema's duplicate-name validator, so every zone can share e.g. the name
     "Temperature"). Global sensor types stay on the main node."""
-    if config.get(CONF_TYPE) in SENSOR_ZONED and CONF_ZONE in config:
+    if SENSOR_TYPES.get(config.get(CONF_TYPE), {}).get("zoned") and CONF_ZONE in config:
         dev_id = zone_device_id(config.get(CONF_INFINITESP_ID), config[CONF_ZONE])
         if dev_id is not None:
             config[CONF_DEVICE_ID] = dev_id
@@ -156,7 +155,7 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     stype = config[CONF_TYPE]
     info = SENSOR_TYPES[stype]
-    if stype in SENSOR_ZONED:
+    if info.get("zoned"):
         dev_id = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
         if dev_id is not None:
             config[CONF_DEVICE_ID] = dev_id

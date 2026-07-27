@@ -16,13 +16,10 @@ CONF_DEVICE_ADDRESS = "device_address"
 
 InfinitESPTextSensor = infinitesp_ns.class_("InfinitESPTextSensor", text_sensor.TextSensor, InfinitESPEntity)
 
-# Per-zone text_sensor types auto-attach to their zone HA sub-device; global
-# types stay on the main node.
-# Per-zone text_sensor types auto-attach to their zone HA sub-device; global
-# types stay on the main node. NOTE: comfort_profile is intentionally NOT zoned —
-# its decode reads a single fixed register (0x400A, zone 1's comfort table), so
-# it's effectively a global/system diagnostic, not per-zone data.
-TEXT_SENSOR_ZONED = {"zone_name", "hold_state"}
+# Per-zone text_sensor types (marked `"zoned": True`) auto-attach to their zone HA
+# sub-device; global types stay on the main node. NOTE: comfort_profile is
+# intentionally NOT zoned — its decode reads a single fixed register (0x400A,
+# zone 1's comfort table), so it's a global/system diagnostic, not per-zone data.
 
 # type -> {key, [address]}. The dict KEY is the user-facing `type` (== object_id);
 # `key` is the internal firmware sensor-type (decode path), decoupled so a type
@@ -31,8 +28,8 @@ TEXT_SENSOR_ZONED = {"zone_name", "hold_state"}
 # default bus device address baked into role types so it need not be set in YAML
 # (e.g. the three model sensors read the same "device_model" from ODU/IDU/ZC).
 TEXT_SENSOR_TYPES = {
-    "zone_name": {"key": "zone_name"},
-    "hold_state": {"key": "hold_state"},
+    "zone_name": {"key": "zone_name", "zoned": True},
+    "hold_state": {"key": "hold_state", "zoned": True},
     "comfort_profile": {"key": "comfort_profile"},
     "thermostat_wifi_ssid": {"key": "tstat_ssid"},
     "thermostat_hostname": {"key": "tstat_hostname"},
@@ -68,7 +65,7 @@ def _default_name(config):
 def _inject_device_id(config):
     """Pre-schema: attach per-zone text sensors to their zone HA sub-device before
     the base schema's duplicate-name validator runs."""
-    if config.get(CONF_TYPE) in TEXT_SENSOR_ZONED and CONF_ZONE in config:
+    if TEXT_SENSOR_TYPES.get(config.get(CONF_TYPE), {}).get("zoned") and CONF_ZONE in config:
         dev_id = zone_device_id(config.get(CONF_INFINITESP_ID), config[CONF_ZONE])
         if dev_id is not None:
             config[CONF_DEVICE_ID] = dev_id
@@ -90,11 +87,11 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    if config[CONF_TYPE] in TEXT_SENSOR_ZONED:
+    info = TEXT_SENSOR_TYPES[config[CONF_TYPE]]
+    if info.get("zoned"):
         dev_id = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
         if dev_id is not None:
             config[CONF_DEVICE_ID] = dev_id
-    info = TEXT_SENSOR_TYPES[config[CONF_TYPE]]
     var = cg.new_Pvariable(config[CONF_ID])
     await text_sensor.register_text_sensor(var, config)
     cg.add(var.set_zone(config[CONF_ZONE]))
