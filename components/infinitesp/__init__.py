@@ -133,7 +133,12 @@ async def codegen_zoned(config, cls, build_one):
     Otherwise return False (the caller builds the single entity itself)."""
     if not config.get(CONF_ZONED):
         return False
-    for num in hub_zone_numbers(config[CONF_INFINITESP_ID]):
+    zones = hub_zone_numbers(config[CONF_INFINITESP_ID])
+    _LOGGER.info(
+        "infinitesp: '%s' zoned:yes -> %d entities (zones %s)",
+        config.get(CONF_TYPE, config[CONF_ID].id), len(zones), zones,
+    )
+    for num in zones:
         zc = dict(config)
         zc.pop(CONF_ZONED, None)
         zc[_CONF_ZONE] = num
