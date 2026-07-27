@@ -80,9 +80,6 @@ const FEATURES = {
   static_pressure: { section: "idu", label: "Static Pressure", icon: "mdi:gauge", kind: "static", unit: "in wc", digits: 2, accent: "blue" },
   system_mode: { section: "system", label: "System Mode", icon: "mdi:hvac", kind: "select" },
   vacation: { section: "system", label: "Vacation", icon: "mdi:bag-suitcase", kind: "vacation" },
-  // Meta-feature: presence toggles the Fault History section (rendered at the
-  // bottom). Renders no tile of its own (see _renderFeature).
-  faults: { section: "system", label: "Fault History", icon: "mdi:alert-outline", kind: "faults" },
 };
 
 // Per-zone metrics for the Zoning section (order is user-configurable too).
@@ -101,9 +98,22 @@ const ZONE_METRICS = {
 const DEFAULT_SECTIONS = {
   odu: ["outdoor_temp", "coil_temp", "stage", "line_voltage"],
   idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure"],
-  system: ["system_mode", "vacation", "faults"],
+  system: ["system_mode", "vacation"],
   zoning: ["temp", "humidity", "damper", "heat_target", "cool_target", "fan_mode", "activity", "hold_mode"],
 };
+
+// Top-level panels (sections), in default display order. `section_order` config
+// controls their order + visibility (a pane absent from the list is hidden),
+// like the per-section feature lists but "a level up". "faults" is the Fault
+// History section (no features of its own).
+const SECTION_PANES = [
+  { key: "system", label: "System", icon: "mdi:cog-outline" },
+  { key: "idu", label: "Air Handler", icon: "mdi:fan" },
+  { key: "odu", label: "Outdoor Unit", icon: "mdi:heat-pump-outline" },
+  { key: "zoning", label: "Zoning", icon: "mdi:view-dashboard-outline" },
+  { key: "faults", label: "Fault History", icon: "mdi:alert-outline" },
+];
+const SECTION_PANE_KEYS = SECTION_PANES.map((p) => p.key);
 
 // Friendlier labels for select option values, per control context (the option
 // value "auto" means "Heat/Cool" for system mode but plain "Auto" for a fan).
@@ -1518,6 +1528,14 @@ class InfinitespCard extends HTMLElement {
       </div>`;
   }
 
+  // Ordered, visible panel keys. `section_order` config controls order +
+  // visibility (a pane absent from the list is hidden). Defaults to all panes.
+  _sectionOrder() {
+    const cfg = this._config.section_order;
+    if (Array.isArray(cfg)) return cfg.filter((k) => SECTION_PANE_KEYS.includes(k));
+    return SECTION_PANE_KEYS.slice();
+  }
+
   // Ordered, validated feature keys for a section. Falls back to defaults when
   // the user hasn't configured `sections.<name>`.
   _sectionFeatures(section) {
@@ -1557,9 +1575,6 @@ class InfinitespCard extends HTMLElement {
         return this._selectTile(this._selectFeatureId(key), f.label, f.icon, key);
       case "vacation":
         return this._vacationTile(f);
-      case "faults":
-        // Meta-feature: toggles the Fault History section; no tile of its own.
-        return "";
       default:
         return "";
     }
@@ -1708,14 +1723,11 @@ class InfinitespCard extends HTMLElement {
     const outdoorExtra = outdoorOwns ? chart : "";
     const indoorExtra = indoorOwns ? chart : "";
 
-    // System section (System Mode, Vacation). The "faults" meta-feature renders
-    // no tile — it gates the Fault History section below. Hide the whole System
-    // panel if it has no visible tiles (e.g. only "faults" left).
+    // System section (System Mode, Vacation). Hidden if it has no visible tiles.
     const systemTiles = this._sectionFeatures("system").map((k) => this._renderFeature(k)).join("");
     const systemSection = systemTiles.trim()
       ? this._section(`<span><ha-icon class="sec-ic" icon="mdi:cog-outline"></ha-icon> System</span>`, "", systemTiles, "")
       : "";
-    const showFaults = this._sectionFeatures("system").includes("faults");
 
     // Zoning section (only when zones are configured)
     let zoningSection = "";
@@ -1729,6 +1741,21 @@ class InfinitespCard extends HTMLElement {
       );
     }
 
+    const faultsSection = `<div class="section">
+          <div class="section-label"><span><ha-icon class="sec-ic" icon="mdi:alert-outline"></ha-icon> Fault History</span>${faultBadges}</div>
+          <div class="faults">${faultRows}</div>
+        </div>`;
+
+    // Panel HTML by key; the visible set + order come from `section_order`.
+    const panes = {
+      system: systemSection,
+      idu: this._section(`<span><ha-icon class="sec-ic" icon="mdi:fan"></ha-icon> Air Handler ${this._modelChip(e.furnace_model)}</span>`, "", indoor, indoorExtra),
+      odu: this._section(`<span><ha-icon class="sec-ic" icon="mdi:heat-pump-outline"></ha-icon> Outdoor Unit ${this._modelChip(e.odu_model)}</span>`, "", outdoor, outdoorExtra),
+      zoning: zoningSection,
+      faults: faultsSection,
+    };
+    const body = this._sectionOrder().map((k) => panes[k] || "").join("\n");
+
     this.innerHTML = `
       ${this._styles()}
       <ha-card>
@@ -1736,16 +1763,7 @@ class InfinitespCard extends HTMLElement {
           <ha-icon icon="mdi:hvac"></ha-icon>
           <span class="title">${this._config.title}</span>
         </div>
-
-        ${systemSection}
-        ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:fan"></ha-icon> Air Handler ${this._modelChip(e.furnace_model)}</span>`, "", indoor, indoorExtra)}
-        ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:heat-pump-outline"></ha-icon> Outdoor Unit ${this._modelChip(e.odu_model)}</span>`, "", outdoor, outdoorExtra)}
-        ${zoningSection}
-
-        ${showFaults ? `<div class="section">
-          <div class="section-label"><span><ha-icon class="sec-ic" icon="mdi:alert-outline"></ha-icon> Fault History</span>${faultBadges}</div>
-          <div class="faults">${faultRows}</div>
-        </div>` : ""}
+        ${body}
       </ha-card>`;
 
     if (this._chart.entity) this._renderChart();
@@ -2274,8 +2292,15 @@ class InfinitespCardEditor extends HTMLElement {
         .feat-add-row { margin-top: 6px; }
         .feat-add { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--divider-color);
           background: var(--card-background-color); color: var(--primary-text-color); }
+        .pane-add { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--divider-color);
+          background: var(--card-background-color); color: var(--primary-text-color); }
+        .panes-title { font-weight: 700; font-size: 1rem; margin: 2px 0 6px 2px; }
+        .panes-sub { color: var(--secondary-text-color); font-size: .8rem; margin: 0 0 8px 2px; }
         .sortable-ghost { opacity: .4; }
       </style>
+      <div class="panes-title">Panels</div>
+      <div class="panes-sub">Drag to reorder; remove to hide a whole section.</div>
+      ${this._paneEditorHtml()}
       ${this._sectionEditorHtml("system", "System features")}
       ${this._sectionEditorHtml("idu", "Air Handler features")}
       ${this._sectionEditorHtml("odu", "Outdoor Unit features")}
@@ -2284,13 +2309,66 @@ class InfinitespCardEditor extends HTMLElement {
     this._sectionsRoot.querySelectorAll("ha-sortable").forEach((el) => {
       el.addEventListener("item-moved", (ev) => {
         ev.stopPropagation();
-        const section = el.getAttribute("data-section");
-        this._moveFeature(section, ev.detail.oldIndex, ev.detail.newIndex);
+        if (el.hasAttribute("data-panes")) {
+          this._movePane(ev.detail.oldIndex, ev.detail.newIndex);
+        } else {
+          this._moveFeature(el.getAttribute("data-section"), ev.detail.oldIndex, ev.detail.newIndex);
+        }
       });
     });
   }
 
+  // Ordered, visible panel keys (mirrors the card's _sectionOrder).
+  _sectionOrder() {
+    const cfg = this._config.section_order;
+    if (Array.isArray(cfg)) return cfg.filter((k) => SECTION_PANE_KEYS.includes(k));
+    return SECTION_PANE_KEYS.slice();
+  }
+
+  _paneEditorHtml() {
+    const active = this._sectionOrder();
+    const inactive = SECTION_PANE_KEYS.filter((k) => !active.includes(k));
+    const rows = active
+      .map((k) => {
+        const p = SECTION_PANES.find((x) => x.key === k) || { label: k, icon: "mdi:tune" };
+        return `
+        <div class="feat-row" data-pane="${k}">
+          <div class="feat-row-head">
+            <ha-icon class="handle" icon="mdi:drag"></ha-icon>
+            <ha-icon class="f-ic" icon="${p.icon}"></ha-icon>
+            <span class="f-label">${p.label}</span>
+            <ha-icon-button class="pane-remove" data-pane="${k}" title="Hide panel">
+              <ha-icon icon="mdi:close"></ha-icon>
+            </ha-icon-button>
+          </div>
+        </div>`;
+      })
+      .join("");
+    const addOptions = inactive
+      .map((k) => {
+        const p = SECTION_PANES.find((x) => x.key === k) || { label: k };
+        return `<option value="${k}">${p.label}</option>`;
+      })
+      .join("");
+    const addControl = inactive.length
+      ? `<select class="pane-add"><option value="">+ Show panel…</option>${addOptions}</select>`
+      : `<span class="feat-add-empty">All panels shown</span>`;
+    return `
+      <div class="feat-section">
+        <ha-sortable handle-selector=".handle" data-panes="1">
+          <div class="feat-list">${rows || `<div class="feat-empty">No panels — add one below</div>`}</div>
+        </ha-sortable>
+        <div class="feat-add-row">${addControl}</div>
+      </div>`;
+  }
+
   _onSectionsClick(ev) {
+    const pr = ev.target.closest && ev.target.closest(".pane-remove");
+    if (pr) {
+      const k = pr.getAttribute("data-pane");
+      this._setSectionOrder(this._sectionOrder().filter((x) => x !== k));
+      return;
+    }
     const rm = ev.target.closest && ev.target.closest(".remove");
     if (rm) {
       const section = rm.getAttribute("data-section");
@@ -2308,6 +2386,11 @@ class InfinitespCardEditor extends HTMLElement {
   }
 
   _onSectionsChange(ev) {
+    const pa = ev.target.closest && ev.target.closest(".pane-add");
+    if (pa && pa.value) {
+      this._setSectionOrder(this._sectionOrder().concat(pa.value));
+      return;
+    }
     const sel = ev.target.closest && ev.target.closest(".feat-add");
     if (sel && sel.value) {
       const section = sel.getAttribute("data-section");
@@ -2338,6 +2421,19 @@ class InfinitespCardEditor extends HTMLElement {
   _setSection(section, list) {
     const sections = Object.assign({}, this._config.sections, { [section]: list });
     this._emit(Object.assign({}, this._config, { sections }));
+    this._renderSections();
+  }
+
+  _movePane(from, to) {
+    const list = this._sectionOrder();
+    if (from == null || to == null || from === to) return;
+    const [item] = list.splice(from, 1);
+    list.splice(to, 0, item);
+    this._setSectionOrder(list);
+  }
+
+  _setSectionOrder(list) {
+    this._emit(Object.assign({}, this._config, { section_order: list }));
     this._renderSections();
   }
 
