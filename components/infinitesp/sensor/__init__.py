@@ -47,31 +47,31 @@ SENSOR_TYPES = {
     # bare = actual (measured) RPM [2..3] (the original `compressor_rpm` read
     # [0..1] = target; re-pointed to actual). target_compressor_rpm [0..1] is
     # additive. Infinitude OutdoorUnit.pm 0604: target_rpm / current_rpm.
-    "compressor_rpm": {"key": "compressor_rpm", "unit": "RPM", "bus_class": 5},
-    "target_compressor_rpm": {"key": "target_compressor_rpm", "unit": "RPM", "bus_class": 5},
-    "odu_compressor_frequency": {"key": "compressor_frequency", "unit": "Hz", "bus_class": 5},
+    "compressor_rpm": {"auto": True, "key": "compressor_rpm", "unit": "RPM", "bus_class": 5, "icon": "mdi:engine", "entity_category": "diagnostic"},
+    "target_compressor_rpm": {"auto": True, "key": "target_compressor_rpm", "unit": "RPM", "bus_class": 5, "icon": "mdi:engine", "entity_category": "diagnostic"},
+    "odu_compressor_frequency": {"auto": True, "key": "compressor_frequency", "unit": "Hz", "bus_class": 5, "icon": "mdi:sine-wave", "entity_category": "diagnostic"},
     # ODU expansion valve position from register 0608 byte [2] (0-100 percent).
     # Ramps over 10-15s on cycle transitions; reads 0 (off) or 100 (running) otherwise.
-    "odu_expansion_valve": {"key": "odu_expansion_valve", "unit": "%", "bus_class": 5},
-    "odu_commanded_stage": {"key": "odu_commanded_stage", "unit": "", "bus_class": 5},
+    "odu_expansion_valve": {"auto": True, "key": "odu_expansion_valve", "unit": "%", "bus_class": 5, "icon": "mdi:valve", "entity_category": "diagnostic", "accuracy": 0},
+    "odu_commanded_stage": {"auto": True, "key": "odu_commanded_stage", "unit": "", "bus_class": 5, "icon": "mdi:transmission-tower", "entity_category": "diagnostic"},
     "odu_stage": {"auto": True, "key": "odu_stage", "unit": "", "bus_class": 5, "icon": "mdi:step-forward", "entity_category": "diagnostic"},
     "odu_operating_mode": {"auto": True, "key": "odu_operating_mode", "unit": "", "bus_class": 5, "icon": "mdi:briefcase-edit", "entity_category": "diagnostic"},
     # ODU line voltage from register 0304 byte 7 (whole volts, state-independent)
     "odu_line_voltage": {"auto": True, "key": "odu_line_voltage", "unit": "V", "device_class": DEVICE_CLASS_VOLTAGE, "bus_class": 5, "accuracy": 0, "icon": "mdi:flash", "entity_category": "diagnostic"},
     # ODU IEEE754 float32 values from register 061f
-    "superheat_target": {"key": "odu_float_1", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "superheat_actual": {"key": "odu_float_2", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "subcooling_target": {"key": "odu_float_3", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "subcooling_actual": {"key": "odu_float_4", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "odu_float_5": {"key": "odu_float_5", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "odu_float_6": {"key": "odu_float_6", "unit": "", "bus_class": 5},
+    "superheat_target": {"auto": True, "key": "odu_float_1", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer", "entity_category": "diagnostic"},
+    "superheat_actual": {"auto": True, "key": "odu_float_2", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer", "entity_category": "diagnostic"},
+    "subcooling_target": {"auto": True, "key": "odu_float_3", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer-chevron-down", "entity_category": "diagnostic"},
+    "subcooling_actual": {"auto": True, "key": "odu_float_4", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer-chevron-down", "entity_category": "diagnostic"},
+    "odu_float_5": {"auto": True, "key": "odu_float_5", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer-alert", "entity_category": "diagnostic"},
+    "odu_float_6": {"auto": True, "key": "odu_float_6", "unit": "", "bus_class": 5, "icon": "mdi:blur", "entity_category": "diagnostic", "accuracy": 3},
     # ODU register 0302 temperature measurements
     "odu_outdoor_temp": {"auto": True, "key": "odu_outdoor_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer", "entity_category": "diagnostic"},
     "odu_coil_temp": {"auto": True, "key": "odu_coil_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer", "entity_category": "diagnostic"},
-    "odu_suction_temp": {"key": "odu_suction_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "odu_suction_superheat": {"key": "odu_suction_superheat", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
+    "odu_suction_temp": {"auto": True, "key": "odu_suction_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer", "entity_category": "diagnostic"},
+    "odu_suction_superheat": {"auto": True, "key": "odu_suction_superheat", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer-lines", "entity_category": "diagnostic"},
     "odu_indoor_ambient": {"key": "odu_indoor_ambient", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
-    "odu_discharge_temp": {"key": "odu_discharge_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5},
+    "odu_discharge_temp": {"auto": True, "key": "odu_discharge_temp", "unit": "\u00b0C", "device_class": DEVICE_CLASS_TEMPERATURE, "bus_class": 5, "icon": "mdi:thermometer", "entity_category": "diagnostic"},
     # ZC register 0302 (device class 6 = 0x60>>4). 24-byte TLV [tag,id,hi,lo],
     # °F = uint16_BE / 16. zone N -> id N; id 0x14 = LAT, id 0x1C = HPT.
     # LAT/HPT exist only on zone boards with those thermistor ports wired, so

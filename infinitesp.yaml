@@ -276,90 +276,10 @@ sensor:
   #   entity_category: diagnostic
 
   # Outdoor unit - compressor, passively snooped (target=commanded, actual=measured)
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: target_compressor_rpm
-    icon: "mdi:engine"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: compressor_rpm
-    icon: "mdi:engine"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_compressor_frequency
-    icon: "mdi:sine-wave"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_expansion_valve
-    accuracy_decimals: 0
-    icon: "mdi:valve"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_commanded_stage
-    icon: "mdi:transmission-tower"
-    entity_category: diagnostic
 
   # Outdoor unit - superheat / subcooling (float registers)
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: superheat_target
-    accuracy_decimals: 1
-    icon: "mdi:thermometer"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: superheat_actual
-    accuracy_decimals: 1
-    icon: "mdi:thermometer"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: subcooling_target
-    accuracy_decimals: 1
-    icon: "mdi:thermometer-chevron-down"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: subcooling_actual
-    accuracy_decimals: 1
-    icon: "mdi:thermometer-chevron-down"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_float_5
-    accuracy_decimals: 1
-    icon: "mdi:thermometer-alert"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_float_6
-    accuracy_decimals: 3
-    icon: "mdi:blur"
-    entity_category: diagnostic
 
   # Outdoor unit - temperatures
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_suction_temp
-    accuracy_decimals: 1
-    icon: "mdi:thermometer"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_suction_superheat
-    accuracy_decimals: 1
-    icon: "mdi:thermometer-lines"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_discharge_temp
-    accuracy_decimals: 1
-    icon: "mdi:thermometer"
-    entity_category: diagnostic
 
   # Vacation limits
 
@@ -374,11 +294,6 @@ sensor:
 # ──────────────────────────────────────────────
 
 binary_sensor:
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: compressor_running
-    icon: "mdi:engine"
-    entity_category: diagnostic
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
     type: active_fault

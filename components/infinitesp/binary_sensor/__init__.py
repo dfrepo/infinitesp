@@ -26,7 +26,7 @@ InfinitESPBinarySensor = infinitesp_ns.class_("InfinitESPBinarySensor", binary_s
 BINARY_SENSOR_TYPES = {
     "bus_status": {"auto": True, "bus_class": 0},          # not register-based
     "electric_heat": {"auto": True, "bus_class": 4, "icon": "mdi:fire", "entity_category": "diagnostic"},       # IDU register
-    "compressor_running": {"bus_class": 5},  # ODU register
+    "compressor_running": {"auto": True, "bus_class": 5, "icon": "mdi:engine", "entity_category": "diagnostic"},  # ODU register
     # Per-zone: SAM 3B02 offset-21 zones_unoccupied flag (occupied = bit clear).
     # NOTE this is the thermostat's occupied/away schedule state, not motion.
     "occupancy": {"bus_class": 0, "device_class": "occupancy", "zoned": True},
