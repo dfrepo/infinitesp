@@ -82,6 +82,30 @@ def zone_device_id(hub_id, zone):
     return core.ID(f"{hub_key}_zone{zone}_dev", is_declaration=False, type=Device)
 
 
+def zone_entity_raw(hub_id, num, tag, cls, base=None):
+    """Build a RAW (unvalidated) per-zone entity config for a platform — the
+    single fan-out primitive shared by `auto_zone_entities` and `zoned: yes`.
+    Produces a declared, zone-unique ID plus the hub ref and `zone:` so the
+    platform's own CONFIG_SCHEMA (which the caller applies) generates the
+    name/object_id/device_class and attaches it to the zone sub-device exactly
+    like a hand-written `zone: N` entry.
+
+    hub_id: the hub's core.ID (config[CONF_ID]); num: zone number; tag: object-id
+    suffix for the declared ID (usually the entity `type`, else the platform name
+    for climate/cover); cls: the entity C++ class; base: the entity's own fields
+    (e.g. {CONF_TYPE: "temperature", "icon": "..."}).
+    """
+    hub_key = hub_id.id if hasattr(hub_id, "id") else str(hub_id)
+    raw = {
+        CONF_ID: core.ID(f"{hub_key}_zone{num}_{tag}", is_declaration=True, type=cls),
+        CONF_INFINITESP_ID: hub_id,
+        "zone": num,  # platforms' CONF_ZONE; drives set_zone() + sub-device attach
+    }
+    if base:
+        raw.update(base)
+    return raw
+
+
 # Words that should stay upper-cased (or specially-cased) in an auto-generated
 # entity name. Keeps friendly names readable when they are derived from a `type`
 # token instead of an explicit `name:` (e.g. blower_rpm -> "Blower RPM").
@@ -263,21 +287,16 @@ def _register_zone_entities(config):
     always-compiled base component dir (their headers are auto-included)."""
     if not config.get(CONF_AUTO_ZONE_ENTITIES) or CONF_ZONES not in config:
         return config
-    hub_key = str(config[CONF_ID])
     platforms = _zone_platforms()
     generated = []  # (platform_name, validated_config)
     for num in config[CONF_ZONES]:
         for pname, etype, extra in _ZONE_ENTITY_SPEC:
             schema, _tc, cls = platforms[pname]
-            tag = etype or pname  # object-id-ish suffix for the declared ID
-            raw = {
-                CONF_ID: core.ID(f"{hub_key}_zone{num}_{tag}", is_declaration=True, type=cls),
-                CONF_INFINITESP_ID: config[CONF_ID],
-                "zone": num,  # platforms' CONF_ZONE; drives set_zone() + sub-device attach
-            }
+            base = dict(extra)
             if etype is not None:
-                raw[CONF_TYPE] = etype
-            raw.update(extra)
+                base[CONF_TYPE] = etype
+            tag = etype or pname  # object-id-ish suffix for the declared ID
+            raw = zone_entity_raw(config[CONF_ID], num, tag, cls, base)
             generated.append((pname, schema(raw)))
     config[_KEY_ZONE_ENTS] = generated
     return config
