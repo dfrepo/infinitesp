@@ -203,6 +203,7 @@ infinitesp:
   fault_history: true
   # Auto-create the full standard entity set per zone (no per-zone YAML).
   auto_zone_entities: true
+  auto_global_entities: true
   # flow_control_pin: GPIO13   # RS485 DE/RE control (needed for some transceivers)
   # status_light_id: rgb_led  # Status LED reference (see light: section below)
 
@@ -233,26 +234,12 @@ sensor:
   # Zone environment - add temperature + humidity for each active zone
 
   # Outdoor temperature
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: outdoor_temperature
 
   # Zone board thermistor ports (register 0302, ids 0x14/0x1C). Only populated
   # by a real Zone Controller with LAT/HPT thermistors wired; disabled by
   # default — enable in Home Assistant if your board reports them.
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: leaving_air_temperature
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: hpt_temperature
 
   # Indoor unit diagnostics (passively snooped from bus traffic)
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: blower_rpm
-    icon: "mdi:fan"
-    entity_category: diagnostic
   # Alternative source for the same variable-speed blower RPM, read from the
   # VARSPEED table (register 0404) instead of the primary status register (0306).
   # Undocumented in the Infinitude wiki; useful only as a cross-check. To use it,
@@ -263,26 +250,10 @@ sensor:
   #   type: blower_rpm_0404
   #   icon: "mdi:fan"
   #   entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: airflow_cfm
-    icon: "mdi:air-filter"
-    entity_category: diagnostic
 
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: blower_power
-    icon: "mdi:lightning-bolt"
-    entity_category: diagnostic
 
   # Static pressure (in. w.c.), computed in firmware from blower watts + airflow:
   #   SP = static_k * watts / cfm   (validated k=2.046 vs thermostat; override if needed)
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: static_pressure
-    # static_k: 2.046
-    icon: "mdi:gauge"
-    entity_category: diagnostic
 
   # ──────────────────────────────────────────────
   # Damper position sensors (numeric, per zone) — OPTIONAL
@@ -331,22 +302,6 @@ sensor:
     type: odu_commanded_stage
     icon: "mdi:transmission-tower"
     entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_stage
-    icon: "mdi:step-forward"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_operating_mode
-    icon: "mdi:briefcase-edit"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_line_voltage
-    accuracy_decimals: 0
-    icon: "mdi:flash"
-    entity_category: diagnostic
 
   # Outdoor unit - superheat / subcooling (float registers)
   - platform: infinitesp
@@ -389,18 +344,6 @@ sensor:
   # Outdoor unit - temperatures
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    type: odu_outdoor_temp
-    accuracy_decimals: 1
-    icon: "mdi:thermometer"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: odu_coil_temp
-    accuracy_decimals: 1
-    icon: "mdi:thermometer"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
     type: odu_suction_temp
     accuracy_decimals: 1
     icon: "mdi:thermometer"
@@ -419,16 +362,6 @@ sensor:
     entity_category: diagnostic
 
   # Vacation limits
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: vacation_min_temp
-    icon: "mdi:thermometer-low"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: vacation_max_temp
-    icon: "mdi:thermometer-high"
-    entity_category: diagnostic
 
   # WiFi
   - platform: wifi_signal
@@ -443,16 +376,8 @@ sensor:
 binary_sensor:
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
-    type: bus_status
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
     type: compressor_running
     icon: "mdi:engine"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: electric_heat
-    icon: "mdi:fire"
     entity_category: diagnostic
   - platform: infinitesp
     infinitesp_id: infinitesp_hub
@@ -479,17 +404,9 @@ binary_sensor:
 # Selects
 # ──────────────────────────────────────────────
 
-select:
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: system_mode
   # System-wide vacation. Reads active state from the thermostat's 0x0420
   # broadcast; selecting "off" CANCELS vacation (3B04 push). Activating from HA
   # is not yet supported (the card renders it read-only while inactive).
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: vacation
-    icon: "mdi:bag-suitcase"
 
 # ──────────────────────────────────────────────
 # Numbers — per-zone heat/cool setpoints (read-write, graphable)
@@ -505,72 +422,12 @@ text_sensor:
 
   # Device models (from 0104 DeviceInfo). device_address selects the device:
   #   0x50 = outdoor unit, 0x40 = furnace/air-handler, 0x60 = zone controller.
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: outdoor_unit_model
-    icon: "mdi:heat-pump-outline"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: furnace_model
-    icon: "mdi:fan"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: zoning_board_model
-    icon: "mdi:view-dashboard-outline"
-    entity_category: diagnostic
 
   # Fault history (polled every ~31s)
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: comfort_profile
-    icon: "mdi:thermostat"
-    entity_category: diagnostic
 
   # Thermostat network info
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: thermostat_wifi_ssid
-    icon: "mdi:wifi"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: thermostat_hostname
-    icon: "mdi:network"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: thermostat_wifi_mac
-    icon: "mdi:identifier"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: thermostat_cloud_host
-    icon: "mdi:cloud-outline"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: thermostat_proxy_server
-    icon: "mdi:ip-network"
-    entity_category: diagnostic
 
   # Dealer info
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: dealer_name
-    icon: "mdi:account-hard-hat"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: dealer_brand
-    icon: "mdi:tag"
-    entity_category: diagnostic
-  - platform: infinitesp
-    infinitesp_id: infinitesp_hub
-    type: dealer_url
-    icon: "mdi:web"
-    entity_category: diagnostic
 
   # WiFi
   - platform: wifi_info
