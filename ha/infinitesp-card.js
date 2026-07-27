@@ -114,6 +114,13 @@ const SECTION_PANES = [
   { key: "faults", label: "Fault History", icon: "mdi:alert-outline" },
 ];
 const SECTION_PANE_KEYS = SECTION_PANES.map((p) => p.key);
+// Editor titles for panes that have a per-feature list (faults has none).
+const SECTION_FEATURE_TITLES = {
+  system: "System features",
+  idu: "Air Handler features",
+  odu: "Outdoor Unit features",
+  zoning: "Zoning metrics",
+};
 
 // Friendlier labels for select option values, per control context (the option
 // value "auto" means "Heat/Cool" for system mode but plain "Auto" for a fan).
@@ -2301,10 +2308,10 @@ class InfinitespCardEditor extends HTMLElement {
       <div class="panes-title">Panels</div>
       <div class="panes-sub">Drag to reorder; remove to hide a whole section.</div>
       ${this._paneEditorHtml()}
-      ${this._sectionEditorHtml("system", "System features")}
-      ${this._sectionEditorHtml("idu", "Air Handler features")}
-      ${this._sectionEditorHtml("odu", "Outdoor Unit features")}
-      ${this._sectionEditorHtml("zoning", "Zoning metrics")}`;
+      ${this._sectionOrder()
+        .filter((k) => SECTION_FEATURE_TITLES[k])
+        .map((k) => this._sectionEditorHtml(k, SECTION_FEATURE_TITLES[k]))
+        .join("")}`;
     // ha-sortable's item-moved event doesn't bubble reliably — bind per element.
     this._sectionsRoot.querySelectorAll("ha-sortable").forEach((el) => {
       el.addEventListener("item-moved", (ev) => {
