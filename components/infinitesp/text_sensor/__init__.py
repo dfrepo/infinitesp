@@ -12,6 +12,7 @@ from .. import (
     check_zone_binding,
     codegen_zoned,
     name_from_type,
+    apply_type_presentation,
 )
 
 CONF_ZONE = "zone"
@@ -33,24 +34,24 @@ InfinitESPTextSensor = infinitesp_ns.class_("InfinitESPTextSensor", text_sensor.
 TEXT_SENSOR_TYPES = {
     "zone_name": {"key": "zone_name", "zoned": True},
     "hold_state": {"key": "hold_state", "zoned": True},
-    "comfort_profile": {"key": "comfort_profile"},
-    "thermostat_wifi_ssid": {"key": "tstat_ssid"},
-    "thermostat_hostname": {"key": "tstat_hostname"},
-    "thermostat_wifi_mac": {"key": "tstat_wifi_mac"},
-    "thermostat_cloud_host": {"key": "tstat_cloud_host"},
-    "thermostat_proxy_server": {"key": "tstat_proxy_server"},
-    "dealer_name": {"key": "tstat_dealer_name"},
-    "dealer_brand": {"key": "tstat_dealer_brand"},
-    "dealer_url": {"key": "tstat_dealer_url"},
+    "comfort_profile": {"auto": True, "key": "comfort_profile", "icon": "mdi:thermostat", "entity_category": "diagnostic"},
+    "thermostat_wifi_ssid": {"auto": True, "key": "tstat_ssid", "icon": "mdi:wifi", "entity_category": "diagnostic"},
+    "thermostat_hostname": {"auto": True, "key": "tstat_hostname", "icon": "mdi:network", "entity_category": "diagnostic"},
+    "thermostat_wifi_mac": {"auto": True, "key": "tstat_wifi_mac", "icon": "mdi:identifier", "entity_category": "diagnostic"},
+    "thermostat_cloud_host": {"auto": True, "key": "tstat_cloud_host", "icon": "mdi:cloud-outline", "entity_category": "diagnostic"},
+    "thermostat_proxy_server": {"auto": True, "key": "tstat_proxy_server", "icon": "mdi:ip-network", "entity_category": "diagnostic"},
+    "dealer_name": {"auto": True, "key": "tstat_dealer_name", "icon": "mdi:account-hard-hat", "entity_category": "diagnostic"},
+    "dealer_brand": {"auto": True, "key": "tstat_dealer_brand", "icon": "mdi:tag", "entity_category": "diagnostic"},
+    "dealer_url": {"auto": True, "key": "tstat_dealer_url", "icon": "mdi:web", "entity_category": "diagnostic"},
     "fault_history": {"key": "fault_history"},
-    "manufacture_date": {"key": "manufacture_date"},
+    "manufacture_date": {"auto": True, "key": "manufacture_date", "icon": "mdi:calendar", "entity_category": "diagnostic"},
     # Model readers: same internal "device_model" decode, distinguished by the
     # bus device address. Role types bake in the standard default address (still
     # overridable via `device_address:`), giving each a unique object_id.
     "device_model": {"key": "device_model"},               # generic (set device_address:)
-    "outdoor_unit_model": {"key": "device_model", "address": 0x50},
-    "furnace_model": {"key": "device_model", "address": 0x40},
-    "zoning_board_model": {"key": "device_model", "address": 0x60},
+    "outdoor_unit_model": {"auto": True, "key": "device_model", "address": 0x50, "icon": "mdi:heat-pump-outline", "entity_category": "diagnostic"},
+    "furnace_model": {"auto": True, "key": "device_model", "address": 0x40, "icon": "mdi:fan", "entity_category": "diagnostic"},
+    "zoning_board_model": {"auto": True, "key": "device_model", "address": 0x60, "icon": "mdi:view-dashboard-outline", "entity_category": "diagnostic"},
     # Per-entry fault sensors (1 = most recent) for a Markdown card that needs
     # no 255-char limit. Enable in YAML as needed.
     **{f"fault_{i}": {"key": f"fault_{i}"} for i in range(1, 11)},
@@ -82,10 +83,16 @@ def _validate_zone_binding(config):
     return check_zone_binding(config, info.get("zoned"), f"text_sensor type '{config[CONF_TYPE]}'")
 
 
+def _default_presentation(config):
+    """Pre-schema: inject the type's registry icon/entity_category defaults."""
+    return apply_type_presentation(config, TEXT_SENSOR_TYPES.get(config.get(CONF_TYPE)))
+
+
 CONFIG_SCHEMA = cv.All(
     _validate_zone_binding,
     _default_name,
     _inject_device_id,
+    _default_presentation,
     text_sensor.text_sensor_schema(InfinitESPTextSensor).extend(
         {
             cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),

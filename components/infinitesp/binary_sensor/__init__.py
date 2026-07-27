@@ -12,6 +12,7 @@ from .. import (
     check_zone_binding,
     codegen_zoned,
     name_from_type,
+    apply_type_presentation,
 )
 
 CONF_ZONE = "zone"
@@ -23,8 +24,8 @@ InfinitESPBinarySensor = infinitesp_ns.class_("InfinitESPBinarySensor", binary_s
 # value = {"bus_class": <device-class nibble>, "device_class": optional HA default,
 #          "zoned": True for per-zone types (auto-attach to the zone sub-device)}
 BINARY_SENSOR_TYPES = {
-    "bus_status": {"bus_class": 0},          # not register-based
-    "electric_heat": {"bus_class": 4},       # IDU register
+    "bus_status": {"auto": True, "bus_class": 0},          # not register-based
+    "electric_heat": {"auto": True, "bus_class": 4, "icon": "mdi:fire", "entity_category": "diagnostic"},       # IDU register
     "compressor_running": {"bus_class": 5},  # ODU register
     # Per-zone: SAM 3B02 offset-21 zones_unoccupied flag (occupied = bit clear).
     # NOTE this is the thermostat's occupied/away schedule state, not motion.
@@ -58,10 +59,16 @@ def _validate_zone_binding(config):
     return check_zone_binding(config, info.get("zoned"), f"binary_sensor type '{config[CONF_TYPE]}'")
 
 
+def _default_presentation(config):
+    """Pre-schema: inject the type's registry icon/entity_category defaults."""
+    return apply_type_presentation(config, BINARY_SENSOR_TYPES.get(config.get(CONF_TYPE)))
+
+
 CONFIG_SCHEMA = cv.All(
     _validate_zone_binding,
     _default_name,
     _inject_device_id,
+    _default_presentation,
     binary_sensor.binary_sensor_schema(InfinitESPBinarySensor).extend(
         {
             cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),

@@ -33,7 +33,9 @@ CONF_TEMPERATURE_UNIT = "temperature_unit"
 CONF_ZONES = "zones"
 CONF_FAULT_HISTORY = "fault_history"
 CONF_AUTO_ZONE_ENTITIES = "auto_zone_entities"
-CONF_EXCLUDE_ZONE_ENTITIES = "exclude_zone_entities"
+CONF_AUTO_GLOBAL_ENTITIES = "auto_global_entities"
+# Excluded auto-generated entity types (applies to both zone and global auto).
+CONF_EXCLUDE_ENTITIES = "exclude_entities"
 
 # The full set of fault-history text sensors auto-created when `fault_history:
 # true` is set on the hub. Register 0x4202 always holds exactly 10 entries; the
@@ -75,6 +77,33 @@ def _auto_zone_specs():
             if info.get("zoned") and info.get("auto", True):
                 specs.append((pname, tname))
     return specs
+
+
+def _auto_global_specs():
+    """(platform_name, type) for every GLOBAL (main-node) entity auto-created by
+    `auto_global_entities`: each non-zoned platform type flagged "auto": True (a
+    curated set — most diagnostic/experimental types are left off, opt-in via an
+    explicit YAML block). Lazy-imports the platform modules."""
+    from . import sensor as _se, select as _sl, binary_sensor as _bs, text_sensor as _ts
+    specs = []
+    for pname, types in (
+        ("sensor", _se.SENSOR_TYPES),
+        ("select", _sl.SELECT_TYPES),
+        ("binary_sensor", _bs.BINARY_SENSOR_TYPES),
+        ("text_sensor", _ts.TEXT_SENSOR_TYPES),
+    ):
+        for tname, info in types.items():
+            if info.get("auto") and not info.get("zoned"):
+                specs.append((pname, tname))
+    return specs
+
+
+def _valid_auto_keys():
+    """All exclude-able auto entity keys: zone tags (type or climate/cover) plus
+    global type names."""
+    zk = {etype or pname for pname, etype in _auto_zone_specs()}
+    gk = {t for _p, t in _auto_global_specs()}
+    return zk | gk
 
 
 # Registry of declared zones per hub, populated during validation so entity
@@ -173,6 +202,35 @@ def zone_entity_raw(hub_id, num, tag, cls, base=None):
         raw.update(base)
     return raw
 
+
+def global_entity_raw(hub_id, tag, cls, base=None):
+    """Build a RAW (unvalidated) GLOBAL (main-node) entity config for a platform —
+    the fan-out-of-one primitive used by `auto_global_entities`. Like
+    zone_entity_raw but with no `zone:` (stays on the main node); tag is the entity
+    type (== object_id suffix). The caller applies the platform CONFIG_SCHEMA."""
+    hub_key = hub_id.id if hasattr(hub_id, "id") else str(hub_id)
+    raw = {
+        CONF_ID: core.ID(f"{hub_key}_{tag}", is_declaration=True, type=cls),
+        CONF_INFINITESP_ID: hub_id,
+    }
+    if base:
+        raw.update(base)
+    return raw
+
+
+def apply_type_presentation(config, info):
+    """Pre-schema: inject a type's registry `icon`/`entity_category` defaults so an
+    auto-generated entity looks identical to the equivalent hand-written YAML block
+    (icons + diagnostic categorisation live in the Python type definition, not the
+    YAML). An explicit YAML value always wins. Called by each platform for both
+    hand-written and auto-generated entities."""
+    if not info:
+        return config
+    if info.get("icon") and CONF_ICON not in config:
+        config[CONF_ICON] = info["icon"]
+    if info.get("entity_category") is not None and CONF_ENTITY_CATEGORY not in config:
+        config[CONF_ENTITY_CATEGORY] = info["entity_category"]
+    return config
 
 # Words that should stay upper-cased (or specially-cased) in an auto-generated
 # entity name. Keeps friendly names readable when they are derived from a `type`
@@ -344,31 +402,38 @@ def _zone_platforms():
     }
 
 
+def _validate_exclude(config):
+    """Validate `exclude_entities` names against the union of zone + global auto
+    keys (catches typos), regardless of which auto flag is on."""
+    exclude = set(config.get(CONF_EXCLUDE_ENTITIES, []))
+    if not exclude:
+        return config
+    unknown = exclude - _valid_auto_keys()
+    if unknown:
+        raise cv.Invalid(
+            f"exclude_entities has unknown entr{'y' if len(unknown) == 1 else 'ies'} "
+            f"{sorted(unknown)}; valid: {sorted(_valid_auto_keys())}"
+        )
+    return config
+
+
 def _register_zone_entities(config):
     """When `auto_zone_entities: true`, create every per-zone entity type (see
     _auto_zone_specs — derived from the "zoned" type flags) for every declared
-    zone, minus any listed in `exclude_zone_entities`. No per-zone YAML blocks
-    needed. Each entity config is validated through its platform's own
-    CONFIG_SCHEMA here (so name/object_id/ID/device_class and the zone sub-device
-    attachment are produced exactly as a hand-written entry would be); to_code
-    codegens them. Runs after _register_zones so the zone sub-device IDs are
-    declared. Works for all platforms because the climate/cover/number entity C++
-    classes live in the always-compiled base component dir."""
+    zone, minus any listed in `exclude_entities`. No per-zone YAML blocks needed.
+    Each entity config is validated through its platform's own CONFIG_SCHEMA here
+    (so name/object_id/ID/device_class and the zone sub-device attachment are
+    produced exactly as a hand-written entry would be); to_code codegens them.
+    Runs after _register_zones so the zone sub-device IDs are declared. Works for
+    all platforms because the climate/cover/number entity C++ classes live in the
+    always-compiled base component dir."""
     if not config.get(CONF_AUTO_ZONE_ENTITIES) or CONF_ZONES not in config:
         return config
-    specs = _auto_zone_specs()
-    valid_keys = {etype or pname for pname, etype in specs}
-    exclude = set(config.get(CONF_EXCLUDE_ZONE_ENTITIES, []))
-    unknown = exclude - valid_keys
-    if unknown:
-        raise cv.Invalid(
-            f"exclude_zone_entities has unknown entr{'y' if len(unknown) == 1 else 'ies'} "
-            f"{sorted(unknown)}; valid: {sorted(valid_keys)}"
-        )
+    exclude = set(config.get(CONF_EXCLUDE_ENTITIES, []))
     platforms = _zone_platforms()
     generated = []  # (platform_name, validated_config)
     for num in config[CONF_ZONES]:
-        for pname, etype in specs:
+        for pname, etype in _auto_zone_specs():
             tag = etype or pname  # object-id suffix + exclude key
             if tag in exclude:
                 continue
@@ -379,6 +444,29 @@ def _register_zone_entities(config):
             raw = zone_entity_raw(config[CONF_ID], num, tag, cls, base)
             generated.append((pname, schema(raw)))
     config[_KEY_ZONE_ENTS] = generated
+    return config
+
+
+_KEY_GLOBAL_ENTS = "_global_entities_gen"
+
+
+def _register_global_entities(config):
+    """When `auto_global_entities: true`, create each GLOBAL entity type flagged
+    "auto": True (see _auto_global_specs), minus `exclude_entities`. Single
+    main-node entities (no zone). Validated through each platform's CONFIG_SCHEMA;
+    codegen'd in to_code alongside the zone entities."""
+    if not config.get(CONF_AUTO_GLOBAL_ENTITIES):
+        return config
+    exclude = set(config.get(CONF_EXCLUDE_ENTITIES, []))
+    platforms = _zone_platforms()
+    generated = []
+    for pname, tname in _auto_global_specs():
+        if tname in exclude:
+            continue
+        schema, _tc, cls = platforms[pname]
+        raw = global_entity_raw(config[CONF_ID], tname, cls, {CONF_TYPE: tname})
+        generated.append((pname, schema(raw)))
+    config[_KEY_GLOBAL_ENTS] = generated
     return config
 
 
@@ -427,17 +515,24 @@ CONFIG_SCHEMA = cv.All(
             # heat/cool_target numbers, fan_mode/activity/hold_mode selects,
             # occupancy, hold_state/zone_name) — no per-zone YAML blocks needed.
             cv.Optional(CONF_AUTO_ZONE_ENTITIES, default=False): cv.boolean,
-            # Zone entity types to skip when auto_zone_entities is on. Values are
-            # type names (e.g. zc_zone_temperature) or "climate"/"cover".
-            cv.Optional(CONF_EXCLUDE_ZONE_ENTITIES, default=list): cv.ensure_list(cv.string),
+            # Auto-create every GLOBAL (main-node) entity type flagged "auto":
+            # True — the curated card/diagnostic set (ODU/IDU sensors, models,
+            # system_mode/vacation, wifi/dealer text, etc.). Diagnostic/
+            # experimental types stay opt-in (explicit YAML). No YAML blocks needed.
+            cv.Optional(CONF_AUTO_GLOBAL_ENTITIES, default=False): cv.boolean,
+            # Auto entity types to skip (zone or global). Values are type names
+            # (e.g. zc_zone_temperature, comfort_profile) or "climate"/"cover".
+            cv.Optional(CONF_EXCLUDE_ENTITIES, default=list): cv.ensure_list(cv.string),
         }
     ).extend(cv.COMPONENT_SCHEMA).extend(uart.UART_DEVICE_SCHEMA),
     _validate_addresses,
     _validate_status_led,
     _validate_zc_config,
+    _validate_exclude,
     _register_zones,
     _register_fault_history,
     _register_zone_entities,
+    _register_global_entities,
 )
 
 INFINITESP_DEVICE_SCHEMA = cv.Schema(
@@ -491,6 +586,13 @@ async def to_code(config):
     if _KEY_ZONE_ENTS in config:
         platforms = _zone_platforms()
         for pname, ent_conf in config[_KEY_ZONE_ENTS]:
+            await platforms[pname][1](ent_conf)  # platform to_code
+
+    # Codegen the auto-generated GLOBAL (main-node) entities (from
+    # _register_global_entities).
+    if _KEY_GLOBAL_ENTS in config:
+        platforms = _zone_platforms()
+        for pname, ent_conf in config[_KEY_GLOBAL_ENTS]:
             await platforms[pname][1](ent_conf)  # platform to_code
 
     if config[CONF_ZONE_CONTROLLER_ADDRESS] != 0:

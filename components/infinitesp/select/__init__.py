@@ -11,6 +11,7 @@ from .. import (
     zone_device_id,
     check_zone_binding,
     codegen_zoned,
+    apply_type_presentation,
 )
 
 CONF_ZONE = "zone"
@@ -24,6 +25,7 @@ InfinitESPSelect = infinitesp_ns.class_("InfinitESPSelect", select.Select, Infin
 # auto-group under that zone's HA sub-device; global types forbid `zone:`.
 SELECT_TYPES = {
     "system_mode": {
+        "auto": True,
         "zoned": False,
         "label": "System Mode",
         "options": ["heat", "cool", "auto", "emergency_heat", "off"],
@@ -56,6 +58,8 @@ SELECT_TYPES = {
     # thermostat-initiated vacation); "on" (activate from HA) is a future TODO, so
     # the card renders this read-only while vacation is inactive.
     "vacation": {
+        "auto": True,
+        "icon": "mdi:bag-suitcase",
         "zoned": False,
         "label": "Vacation",
         "options": ["off", "on"],
@@ -90,10 +94,16 @@ def _inject_device_id(config):
     return config
 
 
+def _default_presentation(config):
+    """Pre-schema: inject the type's registry icon/entity_category defaults."""
+    return apply_type_presentation(config, SELECT_TYPES.get(config.get(CONF_TYPE, "")))
+
+
 CONFIG_SCHEMA = cv.All(
     _default_name_from_type,
     _validate_zone,
     _inject_device_id,
+    _default_presentation,
     select.select_schema(InfinitESPSelect).extend(
         {
             cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),
