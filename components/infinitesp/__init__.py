@@ -82,6 +82,54 @@ def zone_device_id(hub_id, zone):
     return core.ID(f"{hub_key}_zone{zone}_dev", is_declaration=False, type=Device)
 
 
+# YAML key: `zoned: yes` on a per-zone entity type fans it out to every hub zone.
+CONF_ZONED = "zoned"
+
+
+def hub_zone_numbers(hub_id):
+    """Return the list of declared zone numbers for a hub (from _HUB_ZONES), or []
+    if none. Used by platforms to fan out `zoned: yes` entries across zones."""
+    hub_key = hub_id.id if hasattr(hub_id, "id") else str(hub_id)
+    return list((_HUB_ZONES.get(hub_key) or {}).keys())
+
+
+_CONF_ZONE = "zone"  # platforms' per-zone key (also their local CONF_ZONE)
+
+
+def check_zone_binding(config, is_zoned, kind):
+    """Strict zone-binding validator (no defaults), shared by all zone-capable
+    platforms: a per-zone type needs exactly one of `zone: N` or `zoned: yes`; a
+    global type forbids both. `kind` labels the platform/type in error messages."""
+    has_zone = _CONF_ZONE in config
+    has_all = bool(config.get(CONF_ZONED))
+    if is_zoned:
+        if has_zone and has_all:
+            raise cv.Invalid(f"{kind}: use either 'zone:' or 'zoned: yes', not both")
+        if not has_zone and not has_all:
+            raise cv.Invalid(f"{kind} is per-zone; add 'zone: N' or 'zoned: yes'")
+    elif has_zone or has_all:
+        raise cv.Invalid(f"{kind} is global; remove zone:/zoned:")
+    return config
+
+
+async def codegen_zoned(config, cls, build_one):
+    """to_code fan-out: when `zoned: yes`, call build_one once per hub zone — each
+    with a zone-unique declared ID and its zone sub-device — and return True.
+    Otherwise return False (the caller builds the single entity itself)."""
+    if not config.get(CONF_ZONED):
+        return False
+    for num in hub_zone_numbers(config[CONF_INFINITESP_ID]):
+        zc = dict(config)
+        zc.pop(CONF_ZONED, None)
+        zc[_CONF_ZONE] = num
+        zc[CONF_ID] = core.ID(f"{config[CONF_ID].id}_zone{num}", is_declaration=True, type=cls)
+        dev = zone_device_id(config[CONF_INFINITESP_ID], num)
+        if dev is not None:
+            zc[CONF_DEVICE_ID] = dev
+        await build_one(zc)
+    return True
+
+
 def zone_entity_raw(hub_id, num, tag, cls, base=None):
     """Build a RAW (unvalidated) per-zone entity config for a platform — the
     single fan-out primitive shared by `auto_zone_entities` and `zoned: yes`.

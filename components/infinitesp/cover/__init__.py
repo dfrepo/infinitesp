@@ -6,9 +6,12 @@ from esphome.const import CONF_ID, CONF_NAME, CONF_DEVICE_ID
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
+    CONF_ZONED,
     infinitesp_ns,
     register_infinitesp_entity,
     zone_device_id,
+    check_zone_binding,
+    codegen_zoned,
 )
 
 # Zone damper cover. Reports damper position from the bus (register 0308,
@@ -46,27 +49,34 @@ def _inject_device_id(config):
 
 
 CONFIG_SCHEMA = cv.All(
+    lambda c: check_zone_binding(c, True, "cover"),  # always per-zone
     _default_name,
     _inject_device_id,
     cover.cover_schema(InfinitESPCover).extend(
         {
             cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),
-            cv.Required(CONF_ZONE): cv.int_range(min=1, max=8),
+            cv.Optional(CONF_ZONE): cv.int_range(min=1, max=8),
+            cv.Optional(CONF_ZONED): cv.boolean,
             cv.Optional(CONF_ON_CHANGE): automation.validate_automation(single=True),
         }
     ),
 )
 
 async def to_code(config):
-    dev_id = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
-    if dev_id is not None:
-        config[CONF_DEVICE_ID] = dev_id
-    var = cg.new_Pvariable(config[CONF_ID])
-    await cover.register_cover(var, config)
-    cg.add(var.set_zone(config[CONF_ZONE]))
-    cg.add(var.set_bus_class(6))  # 0x60 >> 4
-    if CONF_ON_CHANGE in config:
-        await automation.build_automation(
-            var.get_change_trigger(), [(float, "pos")], config[CONF_ON_CHANGE]
-        )
-    await register_infinitesp_entity(var, config)
+    async def build(c):
+        var = cg.new_Pvariable(c[CONF_ID])
+        await cover.register_cover(var, c)
+        cg.add(var.set_zone(c.get(CONF_ZONE, 1)))
+        cg.add(var.set_bus_class(6))  # 0x60 >> 4
+        if CONF_ON_CHANGE in c:
+            await automation.build_automation(
+                var.get_change_trigger(), [(float, "pos")], c[CONF_ON_CHANGE]
+            )
+        await register_infinitesp_entity(var, c)
+
+    if await codegen_zoned(config, InfinitESPCover, build):
+        return
+    dev = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
+    if dev is not None:
+        config[CONF_DEVICE_ID] = dev
+    await build(config)

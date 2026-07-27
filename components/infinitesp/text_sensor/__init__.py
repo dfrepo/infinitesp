@@ -5,9 +5,12 @@ from esphome.const import CONF_ID, CONF_NAME, CONF_TYPE, CONF_DEVICE_ID
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
+    CONF_ZONED,
     infinitesp_ns,
     register_infinitesp_entity,
     zone_device_id,
+    check_zone_binding,
+    codegen_zoned,
     name_from_type,
 )
 
@@ -72,14 +75,23 @@ def _inject_device_id(config):
     return config
 
 
+def _validate_zone_binding(config):
+    info = TEXT_SENSOR_TYPES.get(config.get(CONF_TYPE))
+    if info is None:
+        return config
+    return check_zone_binding(config, info.get("zoned"), f"text_sensor type '{config[CONF_TYPE]}'")
+
+
 CONFIG_SCHEMA = cv.All(
+    _validate_zone_binding,
     _default_name,
     _inject_device_id,
     text_sensor.text_sensor_schema(InfinitESPTextSensor).extend(
         {
             cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),
             cv.Required(CONF_TYPE): cv.one_of(*TEXT_SENSOR_TYPES, lower=True),
-            cv.Optional(CONF_ZONE, default=1): cv.int_range(min=1, max=8),
+            cv.Optional(CONF_ZONE): cv.int_range(min=1, max=8),
+            cv.Optional(CONF_ZONED): cv.boolean,
             cv.Optional(CONF_DEVICE_ADDRESS): cv.hex_uint8_t,
         }
     ),
@@ -88,16 +100,22 @@ CONFIG_SCHEMA = cv.All(
 
 async def to_code(config):
     info = TEXT_SENSOR_TYPES[config[CONF_TYPE]]
-    if info.get("zoned"):
-        dev_id = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
-        if dev_id is not None:
-            config[CONF_DEVICE_ID] = dev_id
-    var = cg.new_Pvariable(config[CONF_ID])
-    await text_sensor.register_text_sensor(var, config)
-    cg.add(var.set_zone(config[CONF_ZONE]))
-    cg.add(var.set_sensor_type(info["key"]))
-    # Device address: explicit YAML wins, else the role type's baked-in default.
-    addr = config.get(CONF_DEVICE_ADDRESS, info.get("address"))
-    if addr is not None:
-        cg.add(var.set_device_address(addr))
-    await register_infinitesp_entity(var, config)
+
+    async def build(c):
+        var = cg.new_Pvariable(c[CONF_ID])
+        await text_sensor.register_text_sensor(var, c)
+        cg.add(var.set_zone(c.get(CONF_ZONE, 1)))
+        cg.add(var.set_sensor_type(info["key"]))
+        # Device address: explicit YAML wins, else the role type's baked-in default.
+        addr = c.get(CONF_DEVICE_ADDRESS, info.get("address"))
+        if addr is not None:
+            cg.add(var.set_device_address(addr))
+        await register_infinitesp_entity(var, c)
+
+    if await codegen_zoned(config, InfinitESPTextSensor, build):
+        return
+    if info.get("zoned") and CONF_ZONE in config:
+        dev = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
+        if dev is not None:
+            config[CONF_DEVICE_ID] = dev
+    await build(config)

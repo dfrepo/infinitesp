@@ -5,9 +5,12 @@ from esphome.const import CONF_ID, CONF_NAME, CONF_TYPE, CONF_DEVICE_ID, DEVICE_
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
+    CONF_ZONED,
     infinitesp_ns,
     register_infinitesp_entity,
     zone_device_id,
+    check_zone_binding,
+    codegen_zoned,
 )
 
 CONF_ZONE = "zone"
@@ -36,14 +39,10 @@ NUMBER_TYPES = {
 
 
 def _validate_zone(config):
-    """Enforce zone: presence per type (per-zone types require it; global forbid it)."""
-    zoned = NUMBER_TYPES[config[CONF_TYPE]]["zoned"]
-    has_zone = CONF_ZONE in config
-    if zoned and not has_zone:
-        raise cv.Invalid(f"number type '{config[CONF_TYPE]}' is per-zone; add 'zone:'")
-    if not zoned and has_zone:
-        raise cv.Invalid(f"number type '{config[CONF_TYPE]}' is global; remove 'zone:'")
-    return config
+    """Strict: per-zone types need `zone: N` xor `zoned: yes`; global forbids both."""
+    return check_zone_binding(
+        config, NUMBER_TYPES[config[CONF_TYPE]]["zoned"], f"number type '{config[CONF_TYPE]}'"
+    )
 
 
 def _default_name_from_type(config):
@@ -84,27 +83,30 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),
             cv.Required(CONF_TYPE): cv.one_of(*NUMBER_TYPES, lower=True),
-            # No default: presence is meaningful — _validate_zone requires it for
-            # per-zone types and forbids it for global ones.
+            # No default: presence is meaningful — _validate_zone requires a
+            # binding (zone: or zoned:) for per-zone types, forbids it for global.
             cv.Optional(CONF_ZONE): cv.int_range(min=1, max=8),
+            cv.Optional(CONF_ZONED): cv.boolean,
         }
     ),
 )
 
 
 async def to_code(config):
-    # Attach to the zone sub-device via config so the standard registration
-    # both wires the device AND applies per-device name uniqueness (two zones
-    # can each have a "Heat Target"). Must be set before register_number().
-    if NUMBER_TYPES[config[CONF_TYPE]]["zoned"]:
-        dev_id = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
-        if dev_id is not None:
-            config[CONF_DEVICE_ID] = dev_id
-    var = cg.new_Pvariable(config[CONF_ID])
-    await number.register_number(
-        var, config, min_value=MIN_C, max_value=MAX_C, step=1.0
-    )
-    if NUMBER_TYPES[config[CONF_TYPE]]["zoned"]:
-        cg.add(var.set_zone(config[CONF_ZONE]))
-    cg.add(var.set_number_type(config[CONF_TYPE]))
-    await register_infinitesp_entity(var, config)
+    zoned = NUMBER_TYPES[config[CONF_TYPE]]["zoned"]
+
+    async def build(c):
+        var = cg.new_Pvariable(c[CONF_ID])
+        await number.register_number(var, c, min_value=MIN_C, max_value=MAX_C, step=1.0)
+        if zoned:
+            cg.add(var.set_zone(c.get(CONF_ZONE, 1)))
+        cg.add(var.set_number_type(c[CONF_TYPE]))
+        await register_infinitesp_entity(var, c)
+
+    if await codegen_zoned(config, InfinitESPNumber, build):
+        return
+    if zoned and CONF_ZONE in config:
+        dev = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
+        if dev is not None:
+            config[CONF_DEVICE_ID] = dev
+    await build(config)

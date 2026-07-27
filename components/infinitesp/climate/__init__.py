@@ -5,9 +5,12 @@ from esphome.const import CONF_ID, CONF_NAME, CONF_DEVICE_ID
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
+    CONF_ZONED,
     infinitesp_ns,
     register_infinitesp_entity,
     zone_device_id,
+    check_zone_binding,
+    codegen_zoned,
 )
 
 CONF_ZONE = "zone"
@@ -35,24 +38,29 @@ def _inject_device_id(config):
 
 
 CONFIG_SCHEMA = cv.All(
+    lambda c: check_zone_binding(c, True, "climate"),  # always per-zone
     _default_name,
     _inject_device_id,
     climate.climate_schema(InfinitESPClimate).extend(
         {
             cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),
-            cv.Required(CONF_ZONE): cv.int_range(min=1, max=8),
+            cv.Optional(CONF_ZONE): cv.int_range(min=1, max=8),
+            cv.Optional(CONF_ZONED): cv.boolean,
         }
     ),
 )
 
 
 async def to_code(config):
-    # Re-assert the sub-device attachment before register_climate (device_id must
-    # be set before registration so the entity attaches to the zone sub-device).
-    dev_id = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
-    if dev_id is not None:
-        config[CONF_DEVICE_ID] = dev_id
-    var = cg.new_Pvariable(config[CONF_ID])
-    await climate.register_climate(var, config)
-    cg.add(var.set_zone(config[CONF_ZONE]))
-    await register_infinitesp_entity(var, config)
+    async def build(c):
+        var = cg.new_Pvariable(c[CONF_ID])
+        await climate.register_climate(var, c)
+        cg.add(var.set_zone(c.get(CONF_ZONE, 1)))
+        await register_infinitesp_entity(var, c)
+
+    if await codegen_zoned(config, InfinitESPClimate, build):
+        return
+    dev = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
+    if dev is not None:
+        config[CONF_DEVICE_ID] = dev
+    await build(config)

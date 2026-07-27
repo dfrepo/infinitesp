@@ -5,9 +5,12 @@ from esphome.const import CONF_ID, CONF_NAME, CONF_TYPE, CONF_DISABLED_BY_DEFAUL
 from .. import (
     InfinitESPEntity,
     CONF_INFINITESP_ID,
+    CONF_ZONED,
     infinitesp_ns,
     register_infinitesp_entity,
     zone_device_id,
+    check_zone_binding,
+    codegen_zoned,
     name_from_type,
 )
 
@@ -132,7 +135,17 @@ def _apply_sensor_type(config):
     return config
 
 
+def _validate_zone_binding(config):
+    """Strict: per-zone types need `zone: N` xor `zoned: yes`; global forbids both.
+    (Invalid types are reported by the base schema's one_of, so ignore them here.)"""
+    info = SENSOR_TYPES.get(config.get(CONF_TYPE))
+    if info is None:
+        return config
+    return check_zone_binding(config, info.get("zoned"), f"sensor type '{config[CONF_TYPE]}'")
+
+
 CONFIG_SCHEMA = cv.All(
+    _validate_zone_binding,
     _default_name,
     _inject_device_id,
     cv.Schema({cv.Required(CONF_TYPE): cv.one_of(*SENSOR_TYPES, lower=True)}).extend(
@@ -143,7 +156,8 @@ CONFIG_SCHEMA = cv.All(
         ).extend(
             {
                 cv.GenerateID(CONF_INFINITESP_ID): cv.use_id(CONF_INFINITESP_ID),
-                cv.Optional(CONF_ZONE, default=1): cv.int_range(min=1, max=8),
+                cv.Optional(CONF_ZONE): cv.int_range(min=1, max=8),
+                cv.Optional(CONF_ZONED): cv.boolean,
                 cv.Optional(CONF_STATIC_K, default=2.046): cv.float_,
             }
         )
@@ -153,16 +167,21 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    stype = config[CONF_TYPE]
-    info = SENSOR_TYPES[stype]
-    if info.get("zoned"):
-        dev_id = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
-        if dev_id is not None:
-            config[CONF_DEVICE_ID] = dev_id
-    var = cg.new_Pvariable(config[CONF_ID])
-    await sensor.register_sensor(var, config)
-    cg.add(var.set_zone(config[CONF_ZONE]))
-    cg.add(var.set_sensor_type(info["key"]))
-    cg.add(var.set_bus_class(info.get("bus_class", 0)))
-    cg.add(var.set_static_k(config[CONF_STATIC_K]))
-    await register_infinitesp_entity(var, config)
+    info = SENSOR_TYPES[config[CONF_TYPE]]
+
+    async def build(c):
+        var = cg.new_Pvariable(c[CONF_ID])
+        await sensor.register_sensor(var, c)
+        cg.add(var.set_zone(c.get(CONF_ZONE, 1)))
+        cg.add(var.set_sensor_type(info["key"]))
+        cg.add(var.set_bus_class(info.get("bus_class", 0)))
+        cg.add(var.set_static_k(c[CONF_STATIC_K]))
+        await register_infinitesp_entity(var, c)
+
+    if await codegen_zoned(config, InfinitESPSensor, build):
+        return
+    if info.get("zoned") and CONF_ZONE in config:
+        dev = zone_device_id(config[CONF_INFINITESP_ID], config[CONF_ZONE])
+        if dev is not None:
+            config[CONF_DEVICE_ID] = dev
+    await build(config)
