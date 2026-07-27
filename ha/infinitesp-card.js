@@ -78,8 +78,11 @@ const FEATURES = {
   blower_rpm: { section: "idu", label: "Blower", icon: "mdi:fan", kind: "num", unit: "RPM", digits: 0 },
   blower_watts: { section: "idu", label: "Blower Power", icon: "mdi:lightning-bolt", kind: "num", unit: "W", digits: 0 },
   static_pressure: { section: "idu", label: "Static Pressure", icon: "mdi:gauge", kind: "static", unit: "in wc", digits: 2, accent: "blue" },
-  system_mode: { section: "idu", label: "System Mode", icon: "mdi:hvac", kind: "select" },
-  vacation: { section: "idu", label: "Vacation", icon: "mdi:bag-suitcase", kind: "vacation" },
+  system_mode: { section: "system", label: "System Mode", icon: "mdi:hvac", kind: "select" },
+  vacation: { section: "system", label: "Vacation", icon: "mdi:bag-suitcase", kind: "vacation" },
+  // Meta-feature: presence toggles the Fault History section (rendered at the
+  // bottom). Renders no tile of its own (see _renderFeature).
+  faults: { section: "system", label: "Fault History", icon: "mdi:alert-outline", kind: "faults" },
 };
 
 // Per-zone metrics for the Zoning section (order is user-configurable too).
@@ -97,7 +100,8 @@ const ZONE_METRICS = {
 // Default feature order per section (used when `sections:` is not configured).
 const DEFAULT_SECTIONS = {
   odu: ["outdoor_temp", "coil_temp", "stage", "line_voltage"],
-  idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure", "system_mode", "vacation"],
+  idu: ["airflow", "blower_rpm", "blower_watts", "static_pressure"],
+  system: ["system_mode", "vacation", "faults"],
   zoning: ["temp", "humidity", "damper", "heat_target", "cool_target", "fan_mode", "activity", "hold_mode"],
 };
 
@@ -1553,6 +1557,9 @@ class InfinitespCard extends HTMLElement {
         return this._selectTile(this._selectFeatureId(key), f.label, f.icon, key);
       case "vacation":
         return this._vacationTile(f);
+      case "faults":
+        // Meta-feature: toggles the Fault History section; no tile of its own.
+        return "";
       default:
         return "";
     }
@@ -1576,6 +1583,7 @@ class InfinitespCard extends HTMLElement {
       </div>`;
     const odu = section("mdi:heat-pump-outline", "Outdoor Unit", iconRow(DEFAULT_SECTIONS.odu, FEATURES));
     const idu = section("mdi:fan", "Air Handler", iconRow(DEFAULT_SECTIONS.idu, FEATURES));
+    const system = section("mdi:cog-outline", "System", iconRow(["system_mode", "vacation"], FEATURES));
     const zoning = section("mdi:view-dashboard-outline", "Zoning", iconRow(DEFAULT_SECTIONS.zoning, ZONE_METRICS));
     const faults = section("mdi:alert-outline", "Fault History", `<ha-icon class="pv-mic" icon="mdi:history" title="Recent faults &amp; notices"></ha-icon>`);
     return `${this._styles()}
@@ -1603,6 +1611,7 @@ class InfinitespCard extends HTMLElement {
           <div class="pv-secs">
             ${odu}
             ${idu}
+            ${system}
             ${zoning}
             ${faults}
           </div>
@@ -1699,6 +1708,15 @@ class InfinitespCard extends HTMLElement {
     const outdoorExtra = outdoorOwns ? chart : "";
     const indoorExtra = indoorOwns ? chart : "";
 
+    // System section (System Mode, Vacation). The "faults" meta-feature renders
+    // no tile — it gates the Fault History section below. Hide the whole System
+    // panel if it has no visible tiles (e.g. only "faults" left).
+    const systemTiles = this._sectionFeatures("system").map((k) => this._renderFeature(k)).join("");
+    const systemSection = systemTiles.trim()
+      ? this._section(`<span><ha-icon class="sec-ic" icon="mdi:cog-outline"></ha-icon> System</span>`, "", systemTiles, "")
+      : "";
+    const showFaults = this._sectionFeatures("system").includes("faults");
+
     // Zoning section (only when zones are configured)
     let zoningSection = "";
     if (zones.length) {
@@ -1721,12 +1739,13 @@ class InfinitespCard extends HTMLElement {
 
         ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:heat-pump-outline"></ha-icon> Outdoor Unit ${this._modelChip(e.odu_model)}</span>`, "", outdoor, outdoorExtra)}
         ${this._section(`<span><ha-icon class="sec-ic" icon="mdi:fan"></ha-icon> Air Handler ${this._modelChip(e.furnace_model)}</span>`, "", indoor, indoorExtra)}
+        ${systemSection}
         ${zoningSection}
 
-        ${this._config.fault_history === false ? "" : `<div class="section">
+        ${showFaults ? `<div class="section">
           <div class="section-label"><span><ha-icon class="sec-ic" icon="mdi:alert-outline"></ha-icon> Fault History</span>${faultBadges}</div>
           <div class="faults">${faultRows}</div>
-        </div>`}
+        </div>` : ""}
       </ha-card>`;
 
     if (this._chart.entity) this._renderChart();
@@ -1987,7 +2006,6 @@ const EDITOR_LABELS = {
   title: "Card title",
   device_id: "ESPHome device",
   temperature_unit: "Temperature unit",
-  fault_history: "Show Fault History section",
   outdoor_temp: "Outdoor temperature (override)",
   coil_temp: "Coil temperature (override)",
   stage: "Compressor stage (override)",
@@ -2065,8 +2083,6 @@ class InfinitespCardEditor extends HTMLElement {
           },
         },
       },
-      // Which interactive selects to render read-only (display-only, no dropdown).
-      { name: "fault_history", selector: { boolean: {} } },
     ];
   }
 
@@ -2150,7 +2166,6 @@ class InfinitespCardEditor extends HTMLElement {
       title: this._config.title || "",
       device_id: this._config.device_id || "",
       temperature_unit: this._config.temperature_unit || "F",
-      fault_history: this._config.fault_history !== false,
     };
     this._updateHubWarning();
     this._overrideForm.schema = this._overrideSchema();
@@ -2263,6 +2278,7 @@ class InfinitespCardEditor extends HTMLElement {
       </style>
       ${this._sectionEditorHtml("odu", "Outdoor Unit features")}
       ${this._sectionEditorHtml("idu", "Air Handler features")}
+      ${this._sectionEditorHtml("system", "System features")}
       ${this._sectionEditorHtml("zoning", "Zoning metrics")}`;
     // ha-sortable's item-moved event doesn't bubble reliably — bind per element.
     this._sectionsRoot.querySelectorAll("ha-sortable").forEach((el) => {
@@ -2530,7 +2546,6 @@ class InfinitespCardEditor extends HTMLElement {
       device_id: "device_id" in d ? d.device_id || undefined : this._config.device_id,
       device: "device" in d ? d.device || undefined : this._config.device,
       temperature_unit: "temperature_unit" in d ? d.temperature_unit : this._config.temperature_unit,
-      fault_history: "fault_history" in d ? d.fault_history : this._config.fault_history,
       entities,
     });
     this._emit(cfg);
